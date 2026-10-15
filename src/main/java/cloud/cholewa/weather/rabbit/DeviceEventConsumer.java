@@ -9,8 +9,8 @@ import reactor.core.publisher.Mono;
 //Every event of every device arrives here - the queue is bound with "#", about 130 a minute: the
 //status topics of the Shelly devices (routing key "<id>.status.<component>", the body as the
 //device sent it) and the DeviceEvent of the Eaton devices from amx-service ("eaton.<gateway>.<point>").
-//The skeleton only takes them off the queue; reading the frames of the gateway of the weather
-//station, named in the device registry, comes with HAS-236. Each one is logged at DEBUG only - at INFO the volume
+//The skeleton only takes them off the queue; reading the status of the BTHome sensors of the
+//gateway of the weather station, named in the device registry, comes with HAS-236. Each one is logged at DEBUG only - at INFO the volume
 //alone would drown the log
 @Slf4j
 @Service

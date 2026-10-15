@@ -13,8 +13,9 @@ import reactor.netty.resources.ConnectionProvider;
 
 import java.time.Duration;
 
-//One WebClient per service called, each with its own timeouts and its own pool. Built from the
-//injected builder - a prototype, so each gets a fresh one - or the calls would be untraced
+//The WebClient of the device registry, with its own timeouts and its own pool; a service called
+//later gets one the same way. Built from the injected builder - a prototype, so each gets a fresh
+//one - or the calls would be untraced
 @Configuration
 public class WebClientConfig {
 
@@ -40,9 +41,9 @@ public class WebClientConfig {
         return webClient(webClientBuilder, databaseConnectionProvider, logbook, properties.database());
     }
 
-    //the gateway of the station is called through shelly-client (BTHomeSensor.GetConfig, HAS-236), whose
-    //clients put their own connector on the builder, so the Logbook handler
-    //of the clients above does not reach them; this does
+    //the gateway of the station is called through shelly-client (BTHomeSensor.GetConfig, HAS-236),
+    //whose clients put their own connector on the builder, so the Logbook handler of the client
+    //above does not reach them; this does
     @Bean
     ShellyHttpClientCustomizer shellyCallsInTheLog(final Logbook logbook) {
         return http -> http.doOnConnected(connection -> connection.addHandlerLast(new LogbookClientHandler(logbook)));

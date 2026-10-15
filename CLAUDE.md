@@ -7,8 +7,10 @@ registry and the notification publisher, and acts on nothing yet.
 
 Part of the smart-home-automation-system organization — org-wide conventions, the
 repository map and working rules come from the workspace-level context
-(`organization-repository/claude/organization.md`). Claude implements the tasks of the epic
-here as in blinds-service (owner, 2026-10-15), through PRs with both reviews.
+(`organization-repository/claude/organization.md`). Claude implements the tasks of the epics
+HAS-233 (weather) and HAS-242 (blinds) - the owner's decision of 2026-10-15, when HAS-246 and
+HAS-235 were started - through PRs with both reviews; the default of the org (the owner writes
+the service code) holds everywhere else.
 
 ## Role in the system
 
@@ -24,7 +26,11 @@ here as in blinds-service (owner, 2026-10-15), through PRs with both reviews.
   database 4 / water 2 / presence 2 / blinds 2 / weather 2 = 14 of 22), pinned by
   `WeatherServiceApplicationTest`. No migration yet.
 - Integrates with hardware: the WS90 through a Shelly with the BTHome components (paired in
-  HAS-234); its `bthomesensor:2xx` deltas arrive in the `NotifyStatus` frames of the gateway.
+  HAS-234). Every device runs with `enable_rpc: false`, so `events/rpc` - and the
+  `NotifyStatus` frames in it - never reaches the broker: the readings are expected on the
+  status topics of the components, `<gatewayId>/status/bthomesensor:2xx` (routing key
+  `<gatewayId>.status.bthomesensor:2xx`). HAS-234 confirms on the real gateway which topic carries
+  them before HAS-236 reads it.
 
 ## Build & run
 
@@ -43,15 +49,18 @@ here as in blinds-service (owner, 2026-10-15), through PRs with both reviews.
   only and acknowledges; manual ack, prefetch 3, `.contextCapture()` last, errors logged and
   completed — a `Mono` that errors is redelivered at once.
 - **The deployment rolls** (no state that must be single, unlike blinds-service): for a moment
-  the old and the new pod each hold a pool of 2, and Flyway opens one more.
+  the old and the new pod each hold a pool of 2, and Flyway opens one more. True of the skeleton:
+  HAS-237 brings the watch over the gateway (silence in memory, an alert), which two pods of a
+  rollout would both run - decide there between `Recreate` and an alert two pods cannot double.
   `@EnableScheduling` is in `SchedulingConfig` under `@Profile("!test")`.
 - **The broker passwords have no default in `home`**: `cholewa.required-properties` of
   `cholewa-commons` refuses the start without `rabbitmq-password` or
   `notification-rabbitmq-password`, before the first bean. `BrokerPasswordsTest` ties the list
   to the placeholders of `application.yaml`. No copy of `BrokerPasswordCheck` here — it moved
   into the library with this task.
-- **The notification connection is not a bean** (`NotificationRabbitConfig`, the same as in
-  heating- and blinds-service): a `ConnectionFactory` or `RabbitOperations` bean would make
+- **The notification connection is not a bean** (`NotificationRabbitConfig`, the third copy -
+  heating- and blinds-service have the others; up to three stay, a fourth moves it to
+  `cholewa-commons`): a `ConnectionFactory` or `RabbitOperations` bean would make
   `RabbitAutoConfiguration` back off, and the listener would lose manual ack, prefetch and
   observation.
 - **Timeouts of the client**: `internal.service.database.{connect,response}-timeout`, a bare
