@@ -149,6 +149,35 @@ class CurrentWeatherTest {
         assertThat(sut.takeSnapshot()).isEmpty();
     }
 
+    //what the watch over the station judges by: every reading counts, taken or not
+    @Test
+    void should_know_when_the_station_was_heard_last() {
+        assertThat(sut.heardAt()).isEmpty();
+        sut.observe(Metric.BATTERY, number("100", AT));
+
+        sut.seed(Metric.BATTERY, number("100", AT.plusSeconds(600)));
+        sut.observe(Metric.WIND, number("1.1", AT.plusSeconds(60)));
+
+        assertThat(sut.heardAt()).contains(AT.plusSeconds(600));
+    }
+
+    @Test
+    void should_know_the_station_heard_from_the_restored_row() {
+        sut.restore(Map.of(Metric.TEMPERATURE, number("4.4", AT)));
+
+        assertThat(sut.heardAt()).contains(AT);
+    }
+
+    //another station: what the last one did is no sign of life of this one
+    @Test
+    void should_forget_when_the_station_was_heard_when_cleared() {
+        sut.heard(AT);
+
+        sut.clear();
+
+        assertThat(sut.heardAt()).isEmpty();
+    }
+
     private static Reading number(final String value, final Instant at) {
         return Reading.number(new BigDecimal(value), at);
     }

@@ -104,6 +104,14 @@ notification:
   exchange: notification
   env: prod
 
+# the watch over the weather station and its gateway (StationWatch, after every read of the gateway,
+# every five minutes): no reading from the station - or no answer from the gateway - for silent-after
+# is an alert, repeated every reminder-interval while it lasts. A bare number is minutes
+weather:
+  monitor:
+    silent-after: 30m
+    reminder-interval: 1h
+
 # the services this one calls inside the cluster, over k8s DNS. A bare number of a timeout is
 # seconds
 internal:

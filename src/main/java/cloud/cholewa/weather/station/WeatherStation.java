@@ -5,6 +5,7 @@ import cloud.cholewa.weather.model.Station;
 import cloud.cholewa.weather.model.StationLink;
 import cloud.cholewa.weather.model.StationSensors;
 import cloud.cholewa.weather.reading.CurrentWeather;
+import cloud.cholewa.weather.reading.SensorReadings;
 import cloud.cholewa.weather.registry.DeviceRegistryClient;
 import cloud.cholewa.weather.registry.StationMapper;
 import lombok.RequiredArgsConstructor;
@@ -13,7 +14,6 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -21,22 +21,22 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 //The station the service reads and what the components of its gateway carry. The registry is read at
-//the start and every five minutes (StationRefresh); the map of the sensors is read from the gateway
-//when the station or its gateway changes, while there is none, once an hour, and at the next refresh
-//after a status of a sensor the map does not know (requestSensors) - a re-pairing gives the sensors
-//other ids, and the gateway says nothing about it on the broker (no events/rpc). Another station or
-//gateway clears the current state: what the last one measured is not a reading of this one. Every
-//read of the map also brings what each sensor holds now into the state - a value that never changes
-//(the battery, the rain for days) would otherwise never be known.
+//the start and every five minutes (StationRefresh), and so is the gateway, after it: the map of the
+//sensors - a re-pairing gives the sensors other ids, and the gateway says nothing about it on the
+//broker (no events/rpc) - and what each sensor holds now. That read is the reconciliation with the
+//gateway (HAS-237): a status the broker lost (a restart of the broker, a reconnecting gateway) and a
+//value that never changes (the battery, the rain for days) come into the state this way, and so does
+//the first state after a deploy. Another station or gateway clears the current state: what the last
+//one measured is not a reading of this one.
 //A failed read keeps what was known: a database-service or a gateway away for a moment must not make
-//the station unknown. Until the first read the station is unknown and every event is ignored
+//the station unknown. The time of the last answer of the gateway is what StationWatch judges it by.
+//Until the first read the station is unknown and every event is ignored
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class WeatherStation {
 
-    static final Duration SENSORS_MAX_AGE = Duration.ofHours(1);
-
+    //the map as read from the gateway of a station, and when the gateway answered
     private record Sensors(Station station, StationSensors sensors, Instant readAt) {
     }
 
@@ -45,7 +45,6 @@ public class WeatherStation {
     private final CurrentWeather currentWeather;
     private final Clock clock;
 
-    private final AtomicBoolean sensorsRequested = new AtomicBoolean();
     //what the registry had twice, as last said at WARN - said again only when it changes
     private final AtomicReference<String> duplicates = new AtomicReference<>("");
 
@@ -61,24 +60,28 @@ public class WeatherStation {
                 e.toString()))
             .onErrorResume(e -> Mono.justOrEmpty(station.get()).map(Optional::of))
             .flatMap(Mono::justOrEmpty)
-            .flatMap(this::readSensorsWhenDue);
+            .flatMap(this::readGateway);
     }
 
     public Optional<Station> station() {
         return Optional.ofNullable(station.get());
     }
 
-    //a sensor the map does not know: the gateway is asked again at the next refresh, not at once -
-    //every message of such a sensor asks, and the gateway is a plug
-    public void requestSensors() {
-        sensorsRequested.set(true);
-    }
-
     //the map of the station as it is now - never one read for a station or a gateway since replaced
     public Optional<StationSensors> sensors() {
+        return current().map(Sensors::sensors);
+    }
+
+    //when the gateway of the station answered last - empty until it has answered since the start, or
+    //since the station or the gateway changed
+    public Optional<Instant> gatewayAnsweredAt() {
+        return current().map(Sensors::readAt);
+    }
+
+    private Optional<Sensors> current() {
         final Sensors read = sensors.get();
         return read != null && station().filter(read.station()::equals).isPresent()
-            ? Optional.of(read.sensors())
+            ? Optional.of(read)
             : Optional.empty();
     }
 
@@ -110,33 +113,25 @@ public class WeatherStation {
         }
     }
 
-    private Mono<Void> readSensorsWhenDue(final Station known) {
-        final Sensors read = sensors.get();
-        final boolean due = sensorsRequested.getAndSet(false)
-            || read == null
-            || !read.station().equals(known)
-            || !read.readAt().plus(SENSORS_MAX_AGE).isAfter(clock.instant());
-        if (!due) {
-            return Mono.empty();
-        }
+    private Mono<Void> readGateway(final Station known) {
         return sensorMapLoader.load(known)
             .doOnNext(gateway -> {
                 final StationSensors loaded = gateway.sensors();
                 final Sensors previous = sensors.getAndSet(new Sensors(known, loaded, clock.instant()));
-                if (previous == null || !previous.sensors().equals(loaded)) {
+                if (previous == null || !previous.station().equals(known) || !previous.sensors().equals(loaded)) {
                     log.info("Sensors of the weather station on the gateway {}: {}", known.gatewayDeviceId(), loaded);
                 }
                 gateway.readings().forEach(currentWeather::seed);
-                if (gateway.device() != null && currentWeather.link().isEmpty()) {
-                    currentWeather.link(new StationLink(gateway.device().getRssi(), gateway.device().getBattery(),
-                        gateway.device().getPacketId(), LocalDateTime.now(clock)));
+                if (gateway.device() != null) {
+                    SensorReadings.heardAt(gateway.device()).ifPresent(currentWeather::heard);
+                    if (currentWeather.link().isEmpty()) {
+                        currentWeather.link(new StationLink(gateway.device().getRssi(), gateway.device().getBattery(),
+                            gateway.device().getPacketId(), LocalDateTime.now(clock)));
+                    }
                 }
             })
-            .doOnError(e -> {
-                sensorsRequested.set(true);
-                log.warn("Read of the sensors of the weather station from the gateway {} failed, the last map stays: {}",
-                    known.gatewayDeviceId(), e.toString());
-            })
+            .doOnError(e -> log.warn("Read of the weather station from the gateway {} failed, the last map stays: {}",
+                known.gatewayDeviceId(), e.toString()))
             .onErrorComplete()
             .then();
     }

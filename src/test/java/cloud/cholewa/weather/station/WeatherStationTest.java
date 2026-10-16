@@ -73,17 +73,40 @@ class WeatherStationTest {
         assertThat(sut.sensors()).contains(SENSORS);
     }
 
-    //the gateway is called once an hour, not every five minutes
+    //HAS-237: every refresh reconciles with the gateway - what the broker lost comes back within five
+    //minutes, and a re-pairing is found as soon
     @Test
-    void should_read_the_sensors_again_only_once_an_hour() {
+    void should_read_the_gateway_on_every_refresh() {
         sut.refresh().block();
-        clock.move(Duration.ofMinutes(55));
         sut.refresh().block();
-        verify(loader, times(1)).load(any());
+        sut.refresh().block();
 
-        clock.move(Duration.ofMinutes(5));
+        verify(loader, times(3)).load(any());
+    }
+
+    @Test
+    void should_know_when_the_gateway_answered_last() {
+        assertThat(sut.gatewayAnsweredAt()).isEmpty();
         sut.refresh().block();
-        verify(loader, times(2)).load(any());
+        final Instant answered = clock.instant();
+        clock.move(Duration.ofMinutes(5));
+        when(loader.load(any())).thenReturn(Mono.error(new IllegalStateException("gateway away")));
+
+        sut.refresh().block();
+
+        assertThat(sut.gatewayAnsweredAt()).contains(answered);
+    }
+
+    //an answer of the old gateway says nothing about the new one
+    @Test
+    void should_know_no_answer_of_a_gateway_that_replaced_the_last() {
+        sut.refresh().block();
+        registryHas("shellypro1pm-8813bfda5e94");
+        when(loader.load(any())).thenReturn(Mono.error(new IllegalStateException("gateway away")));
+
+        sut.refresh().block();
+
+        assertThat(sut.gatewayAnsweredAt()).isEmpty();
     }
 
     //a map read for the old gateway is never the map of the new one
@@ -113,7 +136,6 @@ class WeatherStationTest {
     @Test
     void should_keep_the_map_when_the_gateway_is_away() {
         sut.refresh().block();
-        clock.move(Duration.ofHours(2));
         when(loader.load(any())).thenReturn(Mono.error(new IllegalStateException("gateway away")));
 
         sut.refresh().as(StepVerifier::create).verifyComplete();
@@ -130,31 +152,6 @@ class WeatherStationTest {
 
         assertThat(sut.station()).isEmpty();
         assertThat(sut.sensors()).isEmpty();
-    }
-
-    //a re-pairing gives the sensors other ids: asked again at the next refresh, not after an hour
-    @Test
-    void should_read_the_sensors_again_when_asked() {
-        sut.refresh().block();
-        sut.requestSensors();
-
-        sut.refresh().block();
-        sut.refresh().block();
-
-        verify(loader, times(2)).load(any());
-    }
-
-    @Test
-    void should_ask_the_gateway_again_at_the_next_refresh_after_a_failed_read() {
-        sut.refresh().block();
-        clock.move(Duration.ofHours(2));
-        when(loader.load(any())).thenReturn(Mono.error(new IllegalStateException("gateway away")));
-        sut.refresh().block();
-        when(loader.load(any())).thenReturn(Mono.just(READ));
-
-        sut.refresh().block();
-
-        verify(loader, times(3)).load(any());
     }
 
     //a value that never changes is never published: it comes with the read of the map
@@ -178,6 +175,17 @@ class WeatherStationTest {
         sut.refresh().block();
 
         assertThat(currentWeather.link()).map(StationLink::rssi).contains(-73);
+    }
+
+    //the gateway heard the station then, whether a value changed or not - what the watch judges by
+    @Test
+    void should_know_when_the_gateway_heard_the_station() {
+        when(loader.load(any())).thenReturn(Mono.just(new SensorsRead(SENSORS, Map.of(),
+            BthomeDeviceStatus.builder().id(200).rssi(-73).lastUpdatedTs(1792135314L).build())));
+
+        sut.refresh().block();
+
+        assertThat(currentWeather.heardAt()).contains(Instant.ofEpochSecond(1792135314L));
     }
 
     //what the last station measured is not a reading of the new one

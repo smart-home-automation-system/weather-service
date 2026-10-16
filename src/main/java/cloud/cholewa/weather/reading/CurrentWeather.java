@@ -20,6 +20,10 @@ import java.util.concurrent.atomic.AtomicReference;
 //back changes nothing either.
 //The snapshot of WeatherSnapshot takes the state as it is and whether anything changed since the last
 //one; the state restored from the database at the start does not count as a change.
+//Apart from the state, the newest time the gateway heard the station (heardAt): every reading counts,
+//taken or not - the same value again at a later time is no change, but it is the station heard - and
+//so does the last_updated_ts of its bthomedevice. The watch over the station (StationWatch) judges
+//silence by it; the time is the station's, so a reading that arrives late is not a sign of life now.
 //The listener runs on several threads (prefetch 3), hence one lock for the map - a reading of one
 //metric and a snapshot of all of them must not interleave
 @Slf4j
@@ -29,9 +33,11 @@ public class CurrentWeather {
     private final Map<Metric, Reading> readings = new EnumMap<>(Metric.class);
     private boolean changedSinceSnapshot;
     private final AtomicReference<StationLink> link = new AtomicReference<>();
+    private final AtomicReference<Instant> heardAt = new AtomicReference<>();
 
     //true when the reading became the state
     public boolean observe(final Metric metric, final Reading reading) {
+        heard(reading.measuredAt());
         synchronized (readings) {
             final Reading held = readings.get(metric);
             if (reading.sameAs(held)) {
@@ -54,6 +60,7 @@ public class CurrentWeather {
     //the later word; and the same value at a later time is no change - no row for it (the gateway may
     //move the time of a sensor without publishing it)
     public boolean seed(final Metric metric, final Reading reading) {
+        heard(reading.measuredAt());
         synchronized (readings) {
             final Reading held = readings.get(metric);
             final boolean take = held == null
@@ -71,9 +78,12 @@ public class CurrentWeather {
     }
 
     //the state the service starts from: fills only what no message has brought since the start
+    //the station heard then, too: a pod started while the gateway is away knows how long the station
+    //has been silent from its last row, not from its own start
     public void restore(final Map<Metric, Reading> stored) {
         synchronized (readings) {
             stored.forEach((metric, reading) -> {
+                heard(reading.measuredAt());
                 final Reading held = readings.get(metric);
                 if (held == null || held.measuredAt().isBefore(reading.measuredAt())) {
                     readings.put(metric, reading);
@@ -89,10 +99,21 @@ public class CurrentWeather {
             changedSinceSnapshot = false;
         }
         link.set(null);
+        heardAt.set(null);
     }
 
     public void link(final StationLink current) {
         link.set(current);
+    }
+
+    //the station was heard at this time (its own) - only a later time moves heardAt
+    public void heard(final Instant at) {
+        heardAt.accumulateAndGet(at, (held, next) -> held == null || next.isAfter(held) ? next : held);
+    }
+
+    //empty until the station was heard - since the start, or since another station replaced it
+    public Optional<Instant> heardAt() {
+        return Optional.ofNullable(heardAt.get());
     }
 
     public Map<Metric, Reading> readings() {

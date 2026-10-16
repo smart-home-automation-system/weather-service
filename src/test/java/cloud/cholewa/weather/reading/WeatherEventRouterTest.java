@@ -31,7 +31,6 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -96,10 +95,11 @@ class WeatherEventRouterTest {
             "{\"id\":200,\"rssi\":-73,\"battery\":100,\"packet_id\":129,\"last_updated_ts\":1792135314,\"key\":false}");
 
         assertThat(currentWeather.link()).contains(new StationLink(-73, 100, 129, LocalDateTime.now(CLOCK)));
+        //1792135314 = 2026-10-16T07:21:54Z
+        assertThat(currentWeather.heardAt()).contains(Instant.parse("2026-10-16T07:21:54Z"));
     }
 
-    //DoD of HAS-236: an unknown sensor id is a WARN and ignored, never a failed message - said once,
-    //and the map is read again
+    //DoD of HAS-236: an unknown sensor id is a WARN and ignored, never a failed message - said once
     @Test
     void should_ignore_a_sensor_the_map_does_not_have() {
         route(GATEWAY + ".status.bthomesensor:230", "{\"id\":230,\"value\":21.5,\"last_updated_ts\":1792135288}");
@@ -110,7 +110,6 @@ class WeatherEventRouterTest {
             assertThat(event.getLevel()).isEqualTo(Level.WARN);
             assertThat(event.getFormattedMessage()).contains("bthomesensor:230");
         });
-        verify(weatherStation).requestSensors();
     }
 
     //the sensors of the other Bluetooth devices on the gateway - there may be many, each change of each
@@ -120,7 +119,6 @@ class WeatherEventRouterTest {
 
         assertThat(currentWeather.readings()).isEmpty();
         assertThat(routerLog.list).isEmpty();
-        verify(weatherStation, never()).requestSensors();
     }
 
     //0 until the gateway has heard the object once, as right after AddDevice
