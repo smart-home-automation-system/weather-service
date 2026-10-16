@@ -27,9 +27,12 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 //the bodies are the ones the gateway TREADMILL published (HAS-234)
@@ -39,7 +42,7 @@ class WeatherEventRouterTest {
     private static final ZoneId HOUSE = ZoneId.of("Europe/Warsaw");
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-16T07:30:00Z"), HOUSE);
     //1792135288 = 2026-10-16T07:21:28Z
-    private static final LocalDateTime MEASURED = LocalDateTime.of(2026, 10, 16, 9, 21, 28);
+    private static final Instant MEASURED = Instant.parse("2026-10-16T07:21:28Z");
 
     private final WeatherStation weatherStation = mock(WeatherStation.class);
     private final CurrentWeather currentWeather = new CurrentWeather();
@@ -52,7 +55,7 @@ class WeatherEventRouterTest {
         when(weatherStation.station()).thenReturn(Optional.of(
             new Station(55, "Weather station", "08:b9:5f:d1:e6:71", 54, GATEWAY, "10.78.30.36")));
         when(weatherStation.sensors()).thenReturn(Optional.of(new StationSensors(Map.of(
-            205, Metric.TEMPERATURE, 208, Metric.RAIN, 212, Metric.WIND_DIRECTION), 200)));
+            205, Metric.TEMPERATURE, 208, Metric.RAIN, 212, Metric.WIND_DIRECTION), Set.of(240, 241), 200)));
         routerLog.start();
         ((Logger) LoggerFactory.getLogger(WeatherEventRouter.class)).addAppender(routerLog);
     }
@@ -93,16 +96,29 @@ class WeatherEventRouterTest {
         assertThat(currentWeather.link()).contains(new StationLink(-73, 100, 129, LocalDateTime.now(CLOCK)));
     }
 
-    //DoD of HAS-236: an unknown sensor id is a WARN and ignored, never a failed message
+    //DoD of HAS-236: an unknown sensor id is a WARN and ignored, never a failed message - said once,
+    //and the map is read again
     @Test
-    void should_ignore_a_sensor_that_is_not_of_the_station() {
+    void should_ignore_a_sensor_the_map_does_not_have() {
         route(GATEWAY + ".status.bthomesensor:230", "{\"id\":230,\"value\":21.5,\"last_updated_ts\":1792135288}");
+        route(GATEWAY + ".status.bthomesensor:230", "{\"id\":230,\"value\":21.6,\"last_updated_ts\":1792135298}");
 
         assertThat(currentWeather.readings()).isEmpty();
         assertThat(routerLog.list).singleElement().satisfies(event -> {
             assertThat(event.getLevel()).isEqualTo(Level.WARN);
             assertThat(event.getFormattedMessage()).contains("bthomesensor:230");
         });
+        verify(weatherStation).requestSensors();
+    }
+
+    //the sensors of the other Bluetooth devices on the gateway - there may be many, each change of each
+    @Test
+    void should_ignore_a_sensor_of_another_device_without_a_word() {
+        route(GATEWAY + ".status.bthomesensor:240", "{\"id\":240,\"value\":21.5,\"last_updated_ts\":1792135288}");
+
+        assertThat(currentWeather.readings()).isEmpty();
+        assertThat(routerLog.list).isEmpty();
+        verify(weatherStation, never()).requestSensors();
     }
 
     //0 until the gateway has heard the object once, as right after AddDevice

@@ -65,6 +65,7 @@ class SensorMapLoaderTest {
             .assertNext(sensors -> {
                 assertThat(sensors.sensors()).containsExactlyInAnyOrderEntriesOf(Map.of(
                     200, Metric.BATTERY, 205, Metric.TEMPERATURE, 209, Metric.WIND, 210, Metric.GUST));
+                assertThat(sensors.others()).containsExactlyInAnyOrder(211, 300);
                 assertThat(sensors.deviceComponent()).isEqualTo(200);
             })
             .verifyComplete();
@@ -83,6 +84,18 @@ class SensorMapLoaderTest {
                 assertThat(sensors.sensors()).containsExactlyEntriesOf(Map.of(205, Metric.TEMPERATURE));
                 assertThat(sensors.deviceComponent()).isNull();
             })
+            .verifyComplete();
+    }
+
+    //a component sent with "config": null is left out, not a failed map
+    @Test
+    void should_skip_a_component_without_its_config() {
+        gateway.enqueue(page(0, 2, 27,
+            "{\"key\":\"bthomesensor:206\",\"status\":{\"id\":206},\"config\":null}",
+            sensor(205, STATION, 0x45, 0)));
+
+        StepVerifier.create(sut.load(station))
+            .assertNext(sensors -> assertThat(sensors.sensors()).containsExactlyEntriesOf(Map.of(205, Metric.TEMPERATURE)))
             .verifyComplete();
     }
 

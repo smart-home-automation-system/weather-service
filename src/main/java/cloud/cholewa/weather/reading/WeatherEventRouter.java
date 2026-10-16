@@ -21,14 +21,18 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 //Which events of the device queue are readings of the station, and what they say. The queue carries
 //every event of every device: the routing key alone decides first - the status of a bthomesensor or
 //the bthomedevice component of the gateway of the station - so the body of any other event is never
 //read. The id of the gateway is matched whatever its case.
 //- <gatewayId>.status.bthomesensor:<id>: {id, value, last_updated_ts}, one sensor, published when its
-//  value changes. A sensor that is not on the map of the station is said at WARN and ignored; one
-//  without a value or a time (0 until the gateway has heard the object once) is no reading
+//  value changes. A sensor of another device on the gateway is ignored without a word, one the map
+//  does not have at all is said at WARN once and has the map read again (unknown()); one without a
+//  value or a time (0 until the gateway has heard the object once) is no reading
 //- <gatewayId>.status.bthomedevice:<id>: the signal, the battery and the packet id of the station.
 //Until the station and its map are known every event is ignored - the first refresh comes at once
 //after the start. A body that is not what its topic carries is an error for the consumer to log
@@ -44,6 +48,10 @@ public class WeatherEventRouter {
     private final CurrentWeather currentWeather;
     private final ShellyMqttDecoder shellyMqttDecoder;
     private final Clock clock;
+
+    //the sensors already said at WARN, for the map they were not on
+    private final AtomicReference<StationSensors> warnedFor = new AtomicReference<>();
+    private final Set<Integer> warned = ConcurrentHashMap.newKeySet();
 
     public Mono<Void> route(final String routingKey, final byte[] body) {
         return Mono.justOrEmpty(ShellyTopic.parse(routingKey))
@@ -62,8 +70,7 @@ public class WeatherEventRouter {
     private Mono<Void> sensor(final ShellyTopic topic, final byte[] body, final StationSensors sensors) {
         final Metric metric = sensors.sensors().get(topic.index());
         if (metric == null) {
-            log.warn("Sensor bthomesensor:{} of the gateway {} is not one of the weather station and is ignored",
-                topic.index(), topic.deviceId());
+            unknown(topic, sensors);
             return Mono.empty();
         }
         return Mono.fromCallable(() -> shellyMqttDecoder.decode(topic, body))
@@ -88,6 +95,25 @@ public class WeatherEventRouter {
             .then();
     }
 
+    //A sensor of another Bluetooth device on the gateway is known and expected - there may be many,
+    //and every change of each arrives here - so nothing is said. One the gateway did not have when the
+    //map was read is said at WARN once per map, and the map is read again at the next refresh: a
+    //re-pairing gives the sensors of the station other ids
+    private void unknown(final ShellyTopic topic, final StationSensors sensors) {
+        if (sensors.others().contains(topic.index())) {
+            return;
+        }
+        if (warnedFor.get() != sensors) {
+            warnedFor.set(sensors);
+            warned.clear();
+        }
+        if (warned.add(topic.index())) {
+            log.warn("Sensor bthomesensor:{} of the gateway {} is not on its map and is ignored; the map is read again",
+                topic.index(), topic.deviceId());
+            weatherStation.requestSensors();
+        }
+    }
+
     //the value as the metric reads it: a flag for RAIN, a number for every other one. A value of the
     //wrong type is a sensor the map got wrong - said at WARN, never stored as something else
     private Optional<Reading> reading(final Metric metric, final BthomeSensorStatus status) {
@@ -96,7 +122,7 @@ public class WeatherEventRouter {
         if (value == null || timestamp == null || timestamp <= 0) {
             return Optional.empty();
         }
-        final LocalDateTime measuredAt = LocalDateTime.ofInstant(Instant.ofEpochSecond(timestamp), clock.getZone());
+        final Instant measuredAt = Instant.ofEpochSecond(timestamp);
         if (metric.isFlag() && value instanceof Boolean flag) {
             return Optional.of(Reading.flag(flag, measuredAt));
         }

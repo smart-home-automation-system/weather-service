@@ -37,6 +37,16 @@ class StationMapperTest {
     }
 
     @Test
+    void should_say_what_the_registry_has_twice() {
+        assertThat(StationMapper.duplicates(
+            List.of(station(70, "aa:bb:cc:dd:ee:ff"), station(55, "08:b9:5f:d1:e6:71")),
+            List.of(gateway(54, "shellyplugsg3-28372f2f0460"))))
+            .isEqualTo("weather station [55, 70]");
+        assertThat(StationMapper.duplicates(List.of(station(55, "08:b9:5f:d1:e6:71")),
+            List.of(gateway(54, "shellyplugsg3-28372f2f0460")))).isEmpty();
+    }
+
+    @Test
     void should_skip_a_device_without_what_it_is_reached_by() {
         final SmartDevice gatewayWithoutId = gateway(54, null);
         final SmartDevice stationWithoutAddress = station(55, null);

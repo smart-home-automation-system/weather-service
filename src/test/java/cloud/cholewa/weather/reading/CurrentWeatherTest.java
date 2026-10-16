@@ -2,9 +2,11 @@ package cloud.cholewa.weather.reading;
 
 import cloud.cholewa.weather.model.Metric;
 import cloud.cholewa.weather.model.Reading;
+import cloud.cholewa.weather.model.StationLink;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Map;
 
@@ -12,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class CurrentWeatherTest {
 
-    private static final LocalDateTime AT = LocalDateTime.of(2026, 10, 16, 9, 21, 28);
+    private static final Instant AT = Instant.parse("2026-10-16T07:21:28Z");
 
     private final CurrentWeather sut = new CurrentWeather();
 
@@ -36,8 +38,21 @@ class CurrentWeatherTest {
         assertThat(sut.readings()).containsEntry(Metric.WIND, number("1.4", AT.plusSeconds(9)));
     }
 
+    //the last Sunday of October house time goes from 02:59 CEST back to 02:00 CET: a reading after it
+    //is newer, whatever its local time says
     @Test
-    void should_take_a_snapshot_only_when_a_reading_arrived_since_the_last() {
+    void should_take_a_reading_after_the_clocks_go_back() {
+        final Instant beforeTheChange = Instant.parse("2026-10-25T00:58:00Z");
+        final Instant afterTheChange = Instant.parse("2026-10-25T01:01:00Z");
+        assertThat(LocalDateTime.ofInstant(afterTheChange, java.time.ZoneId.of("Europe/Warsaw")))
+            .isBefore(LocalDateTime.ofInstant(beforeTheChange, java.time.ZoneId.of("Europe/Warsaw")));
+        sut.observe(Metric.TEMPERATURE, number("4.4", beforeTheChange));
+
+        assertThat(sut.observe(Metric.TEMPERATURE, number("4.2", afterTheChange))).isTrue();
+    }
+
+    @Test
+    void should_take_a_snapshot_only_when_something_changed_since_the_last() {
         assertThat(sut.takeSnapshot()).isEmpty();
 
         sut.observe(Metric.PRESSURE, number("993.3", AT));
@@ -47,6 +62,16 @@ class CurrentWeatherTest {
             assertThat(snapshot.measuredAt()).isEqualTo(AT.plusSeconds(2));
             assertThat(snapshot.readings()).containsOnlyKeys(Metric.PRESSURE, Metric.RAIN);
         });
+        assertThat(sut.takeSnapshot()).isEmpty();
+    }
+
+    //a status the gateway repeats, or a redelivery, is no change - and no row
+    @Test
+    void should_take_no_snapshot_for_the_same_reading_again() {
+        sut.observe(Metric.PRESSURE, number("993.30", AT));
+        sut.takeSnapshot();
+
+        assertThat(sut.observe(Metric.PRESSURE, number("993.3", AT))).isFalse();
         assertThat(sut.takeSnapshot()).isEmpty();
     }
 
@@ -60,23 +85,35 @@ class CurrentWeatherTest {
         assertThat(sut.takeSnapshot()).isPresent();
     }
 
-    //the restored state is no reading that arrived, and never replaces one that did
+    //the restored state is no change, and never replaces a reading that arrived
     @Test
     void should_restore_only_what_no_message_brought() {
         sut.observe(Metric.TEMPERATURE, number("4.4", AT));
         sut.takeSnapshot();
 
         sut.restore(Map.of(
-            Metric.TEMPERATURE, number("3.0", AT.minusMinutes(5)),
-            Metric.WIND_DIRECTION, number("173", AT.minusMinutes(5))));
+            Metric.TEMPERATURE, number("3.0", AT.minusSeconds(300)),
+            Metric.WIND_DIRECTION, number("173", AT.minusSeconds(300))));
 
         assertThat(sut.readings()).containsExactlyInAnyOrderEntriesOf(Map.of(
             Metric.TEMPERATURE, number("4.4", AT),
-            Metric.WIND_DIRECTION, number("173", AT.minusMinutes(5))));
+            Metric.WIND_DIRECTION, number("173", AT.minusSeconds(300))));
         assertThat(sut.takeSnapshot()).isEmpty();
     }
 
-    private static Reading number(final String value, final LocalDateTime at) {
+    @Test
+    void should_forget_everything_when_cleared() {
+        sut.observe(Metric.TEMPERATURE, number("4.4", AT));
+        sut.link(new StationLink(-73, 100, 129, LocalDateTime.of(2026, 10, 16, 9, 21)));
+
+        sut.clear();
+
+        assertThat(sut.readings()).isEmpty();
+        assertThat(sut.link()).isEmpty();
+        assertThat(sut.takeSnapshot()).isEmpty();
+    }
+
+    private static Reading number(final String value, final Instant at) {
         return Reading.number(new BigDecimal(value), at);
     }
 }
