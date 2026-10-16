@@ -16,11 +16,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
-import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -77,7 +74,7 @@ public class WeatherEventRouter {
             .flatMap(Mono::justOrEmpty)
             .cast(ShellyEvent.Status.class)
             .flatMap(status -> Mono.justOrEmpty(status.as(BthomeSensorStatus.class)))
-            .flatMap(status -> Mono.justOrEmpty(reading(metric, status)))
+            .flatMap(status -> Mono.justOrEmpty(SensorReadings.of(metric, status)))
             .doOnNext(reading -> currentWeather.observe(metric, reading))
             .then();
     }
@@ -112,25 +109,5 @@ public class WeatherEventRouter {
                 topic.index(), topic.deviceId());
             weatherStation.requestSensors();
         }
-    }
-
-    //the value as the metric reads it: a flag for RAIN, a number for every other one. A value of the
-    //wrong type is a sensor the map got wrong - said at WARN, never stored as something else
-    private Optional<Reading> reading(final Metric metric, final BthomeSensorStatus status) {
-        final Object value = status.getValue();
-        final Long timestamp = status.getLastUpdatedTs();
-        if (value == null || timestamp == null || timestamp <= 0) {
-            return Optional.empty();
-        }
-        final Instant measuredAt = Instant.ofEpochSecond(timestamp);
-        if (metric.isFlag() && value instanceof Boolean flag) {
-            return Optional.of(Reading.flag(flag, measuredAt));
-        }
-        if (!metric.isFlag() && value instanceof Number number) {
-            return Optional.of(Reading.number(new BigDecimal(number.toString()), measuredAt));
-        }
-        log.warn("Sensor bthomesensor:{} ({}) sent the value {}, which is not what that metric is",
-            status.getId(), metric, value);
-        return Optional.empty();
     }
 }

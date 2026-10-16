@@ -48,6 +48,28 @@ public class CurrentWeather {
         }
     }
 
+    //what a sensor holds now, read from the gateway with the map: a metric not held yet, or a value
+    //other than the held one measured strictly later. It never replaces a held reading of the same
+    //second - the map read may have been answered before an event of that second, and the event is
+    //the later word; and the same value at a later time is no change - no row for it (the gateway may
+    //move the time of a sensor without publishing it)
+    public boolean seed(final Metric metric, final Reading reading) {
+        synchronized (readings) {
+            final Reading held = readings.get(metric);
+            final boolean take = held == null
+                || reading.measuredAt().isAfter(held.measuredAt()) && !sameValue(held, reading);
+            if (take) {
+                readings.put(metric, reading);
+                changedSinceSnapshot = true;
+            }
+            return take;
+        }
+    }
+
+    private static boolean sameValue(final Reading held, final Reading reading) {
+        return reading.sameAs(new Reading(held.number(), held.flag(), reading.measuredAt()));
+    }
+
     //the state the service starts from: fills only what no message has brought since the start
     public void restore(final Map<Metric, Reading> stored) {
         synchronized (readings) {
