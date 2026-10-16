@@ -32,8 +32,9 @@ the dashboard, the blinds schedules and the overview (epic HAS-233). The station
 BTHome packets and has no Wi-Fi; a Shelly with the BTHome components adopts it and publishes the
 readings over MQTT.
 
-Since HAS-236 the service **takes in the readings and stores them**; it has no endpoints yet - the
-read API comes with HAS-238, the watch over the gateway with HAS-237.
+Since HAS-236 the service **takes in the readings and stores them**, since HAS-237 it **reconciles
+with the gateway and tells the household when the station goes silent**; it has no endpoints yet -
+the read API comes with HAS-238.
 
 Everything is non-blocking (Spring WebFlux / Reactor):
 
@@ -46,10 +47,12 @@ Everything is non-blocking (Spring WebFlux / Reactor):
   page by page, through `shelly-client`) says which `bthomesensor:<id>` carries which BTHome object
   of the station - temperature, humidity, dew point, pressure, illuminance, UV index, wind speed and
   gust, wind direction, rain, precipitation, battery, voltage (13 metrics) - and which
-  `bthomedevice:<id>` is the station. Read when the station or the gateway changes, once an hour,
-  and at the next refresh after a sensor the map does not know. Each read also brings what every
-  sensor holds now into the current state - a value that never changes (the battery, the rain for
-  days) is never published, and would otherwise stay unknown.
+  `bthomedevice:<id>` is the station. Read with every refresh, every five minutes - the
+  **reconciliation with the gateway** (HAS-237): each read also brings what every sensor holds now
+  into the current state when it is newer than the state, so a status the broker lost, a value that
+  never changes (the battery, the rain for days - never published) and the first state after a
+  deploy all come in within five minutes. A component the service cannot use is a WARN once, again
+  only after a read without it.
 - **Device events** arrive from RabbitMQ, virtual host `/device` (user `device`), queue
   `device.prod.weather` (`device.dev.weather` in the `local` profile). The queue is bound to
   `amq.topic` with `#` - every event of every device, about 130 a minute; the routing key decides
@@ -57,14 +60,23 @@ Everything is non-blocking (Spring WebFlux / Reactor):
   the **current state in memory**: per metric the last value and when the station measured it. The
   gateway publishes a sensor only when its value changes, so the state is made of the changes; the
   same reading again or an older one changes nothing. A sensor of another Bluetooth device on the
-  gateway is ignored without a word, one the map does not have is a WARN (once) and the map is read
-  again. `<gateway>.status.bthomedevice:<id>` gives the signal and the battery of the station.
+  gateway is ignored without a word, one the map does not have is a WARN (once per map). `<gateway>.status.bthomedevice:<id>` gives the signal and the battery of the station.
 - **Once a minute** the state becomes a row of `weather_reading` - only when something changed since
   the last row; each row is logged at INFO. At the start the state is restored from the latest row
   before anything is stored, and when the pod stops the state is stored once more.
+- **The watch over the station** (HAS-237), after every refresh: no reading from the station for
+  `weather.monitor.silent-after` (default 30 min, 10 min - 24 h) is an **alert** (level `error`),
+  repeated as a **reminder** (`warn`) every `weather.monitor.reminder-interval` (default 1 h,
+  15 min - 7 days) while it lasts, and ends with one **info** when a reading comes again. A gateway
+  that does not answer the read for the same time is a second alert of the same kind. "Heard" is the
+  newest `last_updated_ts` of any reading of the station or of its `bthomedevice` (the gateway's
+  clock; a time more than a minute ahead of the service is not taken); without one since the start the
+  time counts from the start, and the alert says so. The open alerts are rows of `station_alert`, so
+  a restart goes on with the reminders. A notification never fails or stalls the pass (cut off after
+  30 s, logged, tried again with the next pass).
 - **Notifications** go to the `notification` exchange of the virtual host `/notification` over a
-  second connection (`NotificationPublisher` of `cholewa-commons`), named `<pod>/notification` -
-  none is sent yet (HAS-237).
+  second connection (`NotificationPublisher` of `cholewa-commons`), named `<pod>/notification`;
+  `env` is `prod`, `dev` in the `local` profile.
 
 # Run locally
 
@@ -103,3 +115,7 @@ service is not routed by `api-gateway-service` (HAS-239).
   the station, 0.01), `illuminance` (lx), `uv` (0.1), `wind` and `gust` (m/s, 0.01),
   `wind_direction` (°), `raining`, `precipitation` (the running total of the station - its unit is
   checked before HAS-238 shows it), `battery` (%), `voltage` (V, 0.01). No retention yet (HAS-238).
+- `V2__station_alert.sql` - `station_alert`: the alerts of the watch that are open now, one row per
+  watch (`STATION`, `GATEWAY`) with the id of the station in the registry, since when and when the
+  household was last told (`timestamptz`); removed when it is over. An alert about a station the
+  registry no longer has is closed without a word.
