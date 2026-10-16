@@ -68,7 +68,7 @@ class WeatherReadingRepositoryTest {
 
         final WeatherReadingEntity saved = sut.save(reading).block();
 
-        StepVerifier.create(sut.findById(saved.id()))
+        sut.findById(saved.id()).as(StepVerifier::create)
             .assertNext(read -> assertThat(read).usingRecursiveComparison()
                 .withComparatorForType(BigDecimal::compareTo, BigDecimal.class)
                 .ignoringFields("id")
@@ -78,7 +78,7 @@ class WeatherReadingRepositoryTest {
 
     @Test
     void should_store_a_reading_of_one_metric() {
-        StepVerifier.create(sut.save(WeatherReadingEntity.builder().measuredAt(AT).raining(false).build()))
+        sut.save(WeatherReadingEntity.builder().measuredAt(AT).raining(false).build()).as(StepVerifier::create)
             .assertNext(saved -> {
                 assertThat(saved.id()).isNotNull();
                 assertThat(saved.temperature()).isNull();
@@ -93,13 +93,13 @@ class WeatherReadingRepositoryTest {
         sut.save(WeatherReadingEntity.builder().measuredAt(AT).temperature(new BigDecimal("4.4")).build()).block();
         sut.save(WeatherReadingEntity.builder().measuredAt(AT.minusHours(1)).temperature(new BigDecimal("3.9")).build()).block();
 
-        StepVerifier.create(sut.findFirstByOrderByIdDesc())
+        sut.findFirstByOrderByIdDesc().as(StepVerifier::create)
             .assertNext(latest -> assertThat(latest.temperature()).isEqualByComparingTo("3.9"))
             .verifyComplete();
     }
 
     @Test
     void should_read_nothing_from_an_empty_table() {
-        StepVerifier.create(sut.findFirstByOrderByIdDesc()).verifyComplete();
+        sut.findFirstByOrderByIdDesc().as(StepVerifier::create).verifyComplete();
     }
 }

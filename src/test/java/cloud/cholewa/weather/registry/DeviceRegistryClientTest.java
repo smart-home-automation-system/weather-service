@@ -50,7 +50,7 @@ class DeviceRegistryClientTest {
               "vendor":"shelly","bthome":{"address":"08:b9:5f:d1:e6:71"}}]
             """));
 
-        StepVerifier.create(client.getDevices(DeviceKind.WEATHER_STATION))
+        client.getDevices(DeviceKind.WEATHER_STATION).as(StepVerifier::create)
             .assertNext(devices -> assertThat(devices).extracting(SmartDevice::getId).containsExactly(55L))
             .verifyComplete();
 
@@ -65,7 +65,7 @@ class DeviceRegistryClientTest {
     void should_read_an_empty_list_as_no_devices() {
         server.enqueue(json("[]"));
 
-        StepVerifier.create(client.getDevices(DeviceKind.BTHOME_GATEWAY))
+        client.getDevices(DeviceKind.BTHOME_GATEWAY).as(StepVerifier::create)
             .assertNext(devices -> assertThat(devices).isEmpty())
             .verifyComplete();
     }
@@ -78,7 +78,7 @@ class DeviceRegistryClientTest {
             .addHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
             .body("{\"errors\":[{\"message\":\"Internal error\"}]}").build());
 
-        StepVerifier.create(client.getDevices(DeviceKind.WEATHER_STATION))
+        client.getDevices(DeviceKind.WEATHER_STATION).as(StepVerifier::create)
             .expectErrorSatisfies(e -> assertThat(e)
                 .isInstanceOf(RegistryCallException.class)
                 .hasMessage("database-service answered 500"))
@@ -94,7 +94,7 @@ class DeviceRegistryClientTest {
     void should_fail_on_an_answer_without_a_body() {
         server.enqueue(new MockResponse.Builder().code(200).build());
 
-        StepVerifier.create(client.getDevices(DeviceKind.WEATHER_STATION))
+        client.getDevices(DeviceKind.WEATHER_STATION).as(StepVerifier::create)
             .expectErrorSatisfies(e -> assertThat(e)
                 .isInstanceOf(RegistryCallException.class)
                 .hasMessage("database-service answered without a list"))
@@ -105,7 +105,7 @@ class DeviceRegistryClientTest {
     void should_fail_on_an_answer_that_is_not_a_list() {
         server.enqueue(json("{}"));
 
-        StepVerifier.create(client.getDevices(DeviceKind.WEATHER_STATION))
+        client.getDevices(DeviceKind.WEATHER_STATION).as(StepVerifier::create)
             .expectError()
             .verify();
     }

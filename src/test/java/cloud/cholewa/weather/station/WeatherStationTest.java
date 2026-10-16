@@ -62,7 +62,7 @@ class WeatherStationTest {
 
     @Test
     void should_read_the_station_and_its_sensors() {
-        StepVerifier.create(sut.refresh()).verifyComplete();
+        sut.refresh().as(StepVerifier::create).verifyComplete();
 
         assertThat(sut.station()).map(Station::gatewayDeviceId).contains("shellyplugsg3-28372f2f0460");
         assertThat(sut.sensors()).contains(SENSORS);
@@ -88,7 +88,7 @@ class WeatherStationTest {
         registryHas("shellypro1pm-8813bfda5e94");
         when(loader.load(any())).thenReturn(Mono.error(new IllegalStateException("gateway away")));
 
-        StepVerifier.create(sut.refresh()).verifyComplete();
+        sut.refresh().as(StepVerifier::create).verifyComplete();
 
         assertThat(sut.station()).map(Station::gatewayDeviceId).contains("shellypro1pm-8813bfda5e94");
         assertThat(sut.sensors()).isEmpty();
@@ -99,7 +99,7 @@ class WeatherStationTest {
         sut.refresh().block();
         when(registry.getDevices(DeviceKind.WEATHER_STATION)).thenReturn(Mono.error(new RegistryCallException("database-service answered 503")));
 
-        StepVerifier.create(sut.refresh()).verifyComplete();
+        sut.refresh().as(StepVerifier::create).verifyComplete();
 
         assertThat(sut.station()).isPresent();
         assertThat(sut.sensors()).contains(SENSORS);
@@ -111,7 +111,7 @@ class WeatherStationTest {
         clock.move(Duration.ofHours(2));
         when(loader.load(any())).thenReturn(Mono.error(new IllegalStateException("gateway away")));
 
-        StepVerifier.create(sut.refresh()).verifyComplete();
+        sut.refresh().as(StepVerifier::create).verifyComplete();
 
         assertThat(sut.sensors()).contains(SENSORS);
     }
@@ -121,7 +121,7 @@ class WeatherStationTest {
         sut.refresh().block();
         when(registry.getDevices(DeviceKind.WEATHER_STATION)).thenReturn(Mono.just(List.of()));
 
-        StepVerifier.create(sut.refresh()).verifyComplete();
+        sut.refresh().as(StepVerifier::create).verifyComplete();
 
         assertThat(sut.station()).isEmpty();
         assertThat(sut.sensors()).isEmpty();

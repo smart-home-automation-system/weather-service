@@ -39,7 +39,7 @@ class WeatherSnapshotTest {
         nothingStored();
         currentWeather.observe(Metric.TEMPERATURE, Reading.number(new BigDecimal("4.4"), AT));
 
-        StepVerifier.create(sut.snapshot()).verifyComplete();
+        sut.snapshot().as(StepVerifier::create).verifyComplete();
 
         final ArgumentCaptor<WeatherReadingEntity> saved = ArgumentCaptor.forClass(WeatherReadingEntity.class);
         verify(repository).save(saved.capture());
@@ -91,10 +91,10 @@ class WeatherSnapshotTest {
         when(repository.save(any())).thenAnswer(call -> Mono.just(call.getArgument(0)));
         currentWeather.observe(Metric.TEMPERATURE, Reading.number(new BigDecimal("4.4"), AT));
 
-        StepVerifier.create(sut.snapshot()).verifyComplete();
+        sut.snapshot().as(StepVerifier::create).verifyComplete();
         verify(repository, never()).save(any());
 
-        StepVerifier.create(sut.snapshot()).verifyComplete();
+        sut.snapshot().as(StepVerifier::create).verifyComplete();
         verify(repository, times(2)).findFirstByOrderByIdDesc();
         verify(repository, times(1)).save(any());
     }
@@ -107,8 +107,8 @@ class WeatherSnapshotTest {
             .thenAnswer(call -> Mono.just(call.getArgument(0)));
         currentWeather.observe(Metric.TEMPERATURE, Reading.number(new BigDecimal("4.4"), AT));
 
-        StepVerifier.create(sut.snapshot()).verifyComplete();
-        StepVerifier.create(sut.snapshot()).verifyComplete();
+        sut.snapshot().as(StepVerifier::create).verifyComplete();
+        sut.snapshot().as(StepVerifier::create).verifyComplete();
 
         verify(repository, times(2)).save(any());
     }

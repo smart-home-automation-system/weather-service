@@ -61,7 +61,7 @@ class SensorMapLoaderTest {
             sensor(211, STATION, 0x99, 0),
             sensor(300, "aa:bb:cc:dd:ee:ff", 0x45, 0)));
 
-        StepVerifier.create(sut.load(station))
+        sut.load(station).as(StepVerifier::create)
             .assertNext(sensors -> {
                 assertThat(sensors.sensors()).containsExactlyInAnyOrderEntriesOf(Map.of(
                     200, Metric.BATTERY, 205, Metric.TEMPERATURE, 209, Metric.WIND, 210, Metric.GUST));
@@ -79,7 +79,7 @@ class SensorMapLoaderTest {
     void should_know_no_device_component_without_one_of_the_station() {
         gateway.enqueue(page(0, 2, 27, device(201, "aa:bb:cc:dd:ee:ff"), sensor(205, STATION, 0x45, 0)));
 
-        StepVerifier.create(sut.load(station))
+        sut.load(station).as(StepVerifier::create)
             .assertNext(sensors -> {
                 assertThat(sensors.sensors()).containsExactlyEntriesOf(Map.of(205, Metric.TEMPERATURE));
                 assertThat(sensors.deviceComponent()).isNull();
@@ -94,7 +94,7 @@ class SensorMapLoaderTest {
             "{\"key\":\"bthomesensor:206\",\"status\":{\"id\":206},\"config\":null}",
             sensor(205, STATION, 0x45, 0)));
 
-        StepVerifier.create(sut.load(station))
+        sut.load(station).as(StepVerifier::create)
             .assertNext(sensors -> assertThat(sensors.sensors()).containsExactlyEntriesOf(Map.of(205, Metric.TEMPERATURE)))
             .verifyComplete();
     }
@@ -105,7 +105,7 @@ class SensorMapLoaderTest {
         gateway.enqueue(page(0, 6, 27, sensor(205, STATION, 0x45, 0)));
         gateway.enqueue(new MockResponse.Builder().code(500).build());
 
-        StepVerifier.create(sut.load(station)).expectError().verify();
+        sut.load(station).as(StepVerifier::create).expectError().verify();
     }
 
     private static MockResponse page(final int offset, final int total, final int revision, final String... components) {

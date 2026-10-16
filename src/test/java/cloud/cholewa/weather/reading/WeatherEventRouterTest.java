@@ -165,13 +165,13 @@ class WeatherEventRouterTest {
 
     @Test
     void should_fail_on_a_body_that_is_not_the_status_of_its_topic() {
-        StepVerifier.create(sut.route(GATEWAY + ".status.bthomesensor:205", bytes("{\"id\":206,\"value\":4.4}")))
+        sut.route(GATEWAY + ".status.bthomesensor:205", bytes("{\"id\":206,\"value\":4.4}")).as(StepVerifier::create)
             .expectError(ShellyDecodeException.class)
             .verify();
     }
 
     private void route(final String routingKey, final String body) {
-        StepVerifier.create(sut.route(routingKey, bytes(body))).verifyComplete();
+        sut.route(routingKey, bytes(body)).as(StepVerifier::create).verifyComplete();
     }
 
     private static byte[] bytes(final String body) {
