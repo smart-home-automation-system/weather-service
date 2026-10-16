@@ -171,7 +171,7 @@ class WeatherControllerTest {
     //the code is what the dashboard branches on
     @Test
     void should_answer_400_with_a_code_for_an_unknown_metric() {
-        when(weatherHistoryService.queryHistory("rain", FROM, TO)).thenReturn(Mono.error(WeatherException.unknownMetric("rain")));
+        when(weatherHistoryService.queryHistory("rain", FROM, TO)).thenReturn(Mono.error(WeatherException.unknownMetric()));
 
         webTestClient.get().uri(HISTORY, "rain", "2026-10-08T00:00:00", "2026-10-09T00:00:00")
             .exchange()
@@ -180,7 +180,8 @@ class WeatherControllerTest {
             .jsonPath("$.errors.length()").isEqualTo(1)
             .jsonPath("$.errors[0].code").isEqualTo("UNKNOWN_METRIC")
             .jsonPath("$.errors[0].message").isEqualTo("Unknown metric")
-            .jsonPath("$.errors[0].details").isEqualTo("no metric named 'rain'");
+            .jsonPath("$.errors[0].details").isEqualTo("metric must be one of: battery, pressure, illuminance, dewPoint, "
+                + "voltage, raining, humidity, wind, gust, temperature, uv, windDirection, precipitation");
     }
 
     @Test

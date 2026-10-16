@@ -41,6 +41,26 @@ class OneAtATimeTest {
         sut.run(Mono.just("next")).as(StepVerifier::create).expectNext("next").verifyComplete();
     }
 
+    //a query cancelled while it waits must not let the next one run beside the one in progress
+    @Test
+    void should_keep_the_turn_of_a_query_cancelled_while_it_waits() {
+        final Sinks.One<String> first = Sinks.one();
+        final AtomicBoolean thirdStarted = new AtomicBoolean();
+        final StepVerifier firstQuery = sut.run(first.asMono()).as(StepVerifier::create).expectNext("first").expectComplete().verifyLater();
+
+        sut.run(Mono.just("second")).as(StepVerifier::create).thenCancel().verify();
+        final StepVerifier thirdQuery = sut.run(Mono.fromCallable(() -> {
+            thirdStarted.set(true);
+            return "third";
+        })).as(StepVerifier::create).expectNext("third").expectComplete().verifyLater();
+
+        assertThat(thirdStarted).isFalse();
+        first.tryEmitValue("first");
+        firstQuery.verify();
+        thirdQuery.verify();
+        assertThat(thirdStarted).isTrue();
+    }
+
     //a caller that went away (the dashboard closed) lets the next one in
     @Test
     void should_go_on_after_a_cancelled_query() {

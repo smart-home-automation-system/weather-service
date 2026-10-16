@@ -13,6 +13,7 @@ import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -70,5 +71,18 @@ class WeatherHistoryServiceTest {
         sut.queryHistory("raining", FROM, FROM.plusHours(1)).as(StepVerifier::create)
             .assertNext(reply -> assertThat(reply.points()).isEmpty())
             .verifyComplete();
+    }
+
+    //a query that does not answer ends with an error and lets the next one in
+    @Test
+    void should_cut_off_a_query_that_does_not_answer() {
+        when(repository.findHistory(any(), any(), any(), anyLong())).thenReturn(Flux.never());
+
+        StepVerifier.withVirtualTime(() -> sut.queryHistory("wind", FROM, FROM.plusHours(1)))
+            .thenAwait(WeatherHistoryService.QUERY_TIMEOUT)
+            .verifyError(TimeoutException.class);
+
+        when(repository.findHistory(any(), any(), any(), anyLong())).thenReturn(Flux.empty());
+        sut.queryHistory("wind", FROM, FROM.plusHours(1)).as(StepVerifier::create).expectNextCount(1).verifyComplete();
     }
 }

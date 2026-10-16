@@ -9,30 +9,37 @@ import java.util.Optional;
 //config, so the ids may change with a re-pairing and nothing here depends on them.
 //RAIN is the only flag, every other metric a number.
 //The api name is what the read API calls a metric (the keys of /current, the metric of /history) -
-//wire contract of the dashboard and the blinds schedules, pinned by MetricTest
+//wire contract of the dashboard and the blinds schedules, pinned by MetricTest; the column is the one
+//of weather_reading (V1) the history reads
 public enum Metric {
-    BATTERY(0x01, 0, "battery"),
-    PRESSURE(0x04, 0, "pressure"),
-    ILLUMINANCE(0x05, 0, "illuminance"),
-    DEW_POINT(0x08, 0, "dewPoint"),
-    VOLTAGE(0x0C, 0, "voltage"),
-    RAIN(0x20, 0, "raining"),
-    HUMIDITY(0x2E, 0, "humidity"),
-    WIND(0x44, 0, "wind"),
-    GUST(0x44, 1, "gust"),
-    TEMPERATURE(0x45, 0, "temperature"),
-    UV(0x46, 0, "uv"),
-    WIND_DIRECTION(0x5E, 0, "windDirection"),
-    PRECIPITATION(0x5F, 0, "precipitation");
+    BATTERY(0x01, 0, "battery", "battery"),
+    PRESSURE(0x04, 0, "pressure", "pressure"),
+    ILLUMINANCE(0x05, 0, "illuminance", "illuminance"),
+    DEW_POINT(0x08, 0, "dewPoint", "dew_point"),
+    VOLTAGE(0x0C, 0, "voltage", "voltage"),
+    RAIN(0x20, 0, "raining", "raining"),
+    HUMIDITY(0x2E, 0, "humidity", "humidity"),
+    WIND(0x44, 0, "wind", "wind"),
+    GUST(0x44, 1, "gust", "gust"),
+    TEMPERATURE(0x45, 0, "temperature", "temperature"),
+    UV(0x46, 0, "uv", "uv"),
+    WIND_DIRECTION(0x5E, 0, "windDirection", "wind_direction"),
+    PRECIPITATION(0x5F, 0, "precipitation", "precipitation");
 
     private final int objectId;
     private final int index;
     private final String apiName;
+    private final String column;
 
-    Metric(final int objectId, final int index, final String apiName) {
+    Metric(final int objectId, final int index, final String apiName, final String column) {
         this.objectId = objectId;
         this.index = index;
         this.apiName = apiName;
+        this.column = column;
+    }
+
+    public String column() {
+        return column;
     }
 
     public String apiName() {
@@ -56,5 +63,10 @@ public enum Metric {
 
     public boolean isFlag() {
         return this == RAIN;
+    }
+
+    //an angle: 350 and 10 are 20 degrees apart, not 340 - no arithmetic mean, no minimum or maximum
+    public boolean isAngle() {
+        return this == WIND_DIRECTION;
     }
 }

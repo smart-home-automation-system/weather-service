@@ -125,12 +125,38 @@ class WeatherHistoryRepositoryTest {
     //a whole-number column answers as a number like the others
     @Test
     void should_answer_a_whole_number_column() {
-        databaseClient.sql("INSERT INTO weather_reading (measured_at, humidity, wind_direction) VALUES (:at, 98, 173)")
+        databaseClient.sql("INSERT INTO weather_reading (measured_at, humidity) VALUES (:at, 98)")
             .bind("at", DAY.plusMinutes(1))
             .then().block();
 
+        sut.findHistory(Metric.HUMIDITY, DAY, DAY.plusDays(1), 300).collectList().as(StepVerifier::create)
+            .assertNext(points -> assertThat(points).containsExactly(point(DAY, "98.00", "98", "98")))
+            .verifyComplete();
+    }
+
+    //an angle: 350 and 10 average to north, not south; no minimum or maximum
+    @Test
+    void should_average_the_wind_direction_around_the_circle() {
+        databaseClient.sql("""
+                INSERT INTO weather_reading (measured_at, wind_direction)
+                VALUES (:first, 350), (:second, 10), (:third, 90), (:fourth, 180)
+                """)
+            .bind("first", DAY.plusMinutes(1))
+            .bind("second", DAY.plusMinutes(2))
+            .bind("third", DAY.plusMinutes(6))
+            .bind("fourth", DAY.plusMinutes(7))
+            .then().block();
+
         sut.findHistory(Metric.WIND_DIRECTION, DAY, DAY.plusDays(1), 300).collectList().as(StepVerifier::create)
-            .assertNext(points -> assertThat(points).containsExactly(point(DAY, "173.00", "173", "173")))
+            .assertNext(points -> {
+                assertThat(points).extracting(WeatherHistoryReply.Point::avg)
+                    .usingElementComparator(BigDecimal::compareTo)
+                    .containsExactly(new BigDecimal("0"), new BigDecimal("135"));
+                assertThat(points).allSatisfy(point -> {
+                    assertThat(point.min()).isNull();
+                    assertThat(point.max()).isNull();
+                });
+            })
             .verifyComplete();
     }
 

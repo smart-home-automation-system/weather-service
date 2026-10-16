@@ -9,8 +9,6 @@ import reactor.core.publisher.Flux;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.EnumMap;
-import java.util.Map;
 
 //One metric of weather_reading from "from" up to, not including, "to", in buckets of "bucketSeconds",
 //oldest first - the query of the hot-water history of water-service. measured_at is the wall-clock time
@@ -19,41 +17,33 @@ import java.util.Map;
 //without the metric (NULL - never received, or a value that did not fit) is no reading of it, so a
 //bucket of such rows only has no point. The database aggregates: a month is up to 44 000 rows, read
 //through the index on measured_at (V1) and answered as 372.
-//A column cannot be a parameter of a statement, hence the SQL is built here - from the map below only,
-//never from the request. PostgreSQL only: WeatherHistoryRepositoryTest runs it in Docker
+//The wind direction is an angle: its average is the circular mean (the direction of the mean of the unit
+//vectors - 350 and 10 average to 0, not 180), and it has no minimum or maximum - nulls, left out of the
+//answer.
+//A column cannot be a parameter of a statement, hence the SQL is built here - from Metric only, never
+//from the request. PostgreSQL only: WeatherHistoryRepositoryTest runs it in Docker
 @Repository
 @RequiredArgsConstructor
 public class WeatherHistoryRepository {
 
-    private static final Map<Metric, String> COLUMNS = new EnumMap<>(Map.ofEntries(
-        Map.entry(Metric.TEMPERATURE, "temperature"),
-        Map.entry(Metric.HUMIDITY, "humidity"),
-        Map.entry(Metric.DEW_POINT, "dew_point"),
-        Map.entry(Metric.PRESSURE, "pressure"),
-        Map.entry(Metric.ILLUMINANCE, "illuminance"),
-        Map.entry(Metric.UV, "uv"),
-        Map.entry(Metric.WIND, "wind"),
-        Map.entry(Metric.GUST, "gust"),
-        Map.entry(Metric.WIND_DIRECTION, "wind_direction"),
-        Map.entry(Metric.RAIN, "raining"),
-        Map.entry(Metric.PRECIPITATION, "precipitation"),
-        Map.entry(Metric.BATTERY, "battery"),
-        Map.entry(Metric.VOLTAGE, "voltage")
-    ));
-
     private static final String HISTORY = """
         SELECT TIMESTAMP 'epoch'
                    + floor(extract(epoch FROM measured_at) / :bucketSeconds) * :bucketSeconds * INTERVAL '1 second' AS at,
-               round(avg(%1$s), 2) AS avg,
-               min(%1$s) AS min,
-               max(%1$s) AS max
+               %1$s AS avg,
+               %2$s AS min,
+               %3$s AS max
         FROM weather_reading
         WHERE measured_at >= :from
           AND measured_at < :to
-          AND %2$s IS NOT NULL
+          AND %4$s IS NOT NULL
         GROUP BY at
         ORDER BY at
         """;
+
+    //0 up to 360, rounded to 2 decimals before the modulo (a mean a hair below 0 is 0, not 360.00);
+    //atan2 of two zeros (opposite directions in equal parts) is 0
+    private static final String CIRCULAR_MEAN =
+        "(round((degrees(atan2(avg(sin(radians(%1$s))), avg(cos(radians(%1$s))))) + 360)::numeric, 2) %% 360)";
 
     private final DatabaseClient databaseClient;
 
@@ -63,7 +53,12 @@ public class WeatherHistoryRepository {
         final LocalDateTime to,
         final long bucketSeconds
     ) {
-        return databaseClient.sql(HISTORY.formatted(value(metric), COLUMNS.get(metric)))
+        final String value = value(metric);
+        final String sql = metric.isAngle()
+            ? HISTORY.formatted(CIRCULAR_MEAN.formatted(metric.column()), "NULL::numeric", "NULL::numeric", metric.column())
+            : HISTORY.formatted("round(avg(%s), 2)".formatted(value), "min(%s)".formatted(value), "max(%s)".formatted(value),
+                metric.column());
+        return databaseClient.sql(sql)
             .bind("bucketSeconds", bucketSeconds)
             .bind("from", from)
             .bind("to", to)
@@ -79,7 +74,7 @@ public class WeatherHistoryRepository {
     //The rain is a flag - 1 when it rained, 0 when not
     private static String value(final Metric metric) {
         return metric.isFlag()
-            ? "(CASE WHEN %s THEN 1 ELSE 0 END)::numeric".formatted(COLUMNS.get(metric))
-            : COLUMNS.get(metric) + "::numeric";
+            ? "(CASE WHEN %s THEN 1 ELSE 0 END)::numeric".formatted(metric.column())
+            : metric.column() + "::numeric";
     }
 }

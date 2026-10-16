@@ -9,8 +9,10 @@ import java.time.LocalDateTime;
  * {@code gateway} - the gateway of the station; absent while the registry has no station.<br>
  * {@code lastReadingAt} - the newest time the gateway heard the station (house time); absent until it
  * was heard since the start.<br>
- * {@code silent} - nothing heard for {@code weather.monitor.silent-after}, the judgement of the
- * alerts; true as well when nothing was heard at all.
+ * {@code silent} - nothing heard for {@code weather.monitor.silent-after}, the threshold of the
+ * alerts; true as well when nothing was heard since the start - the alert about that waits for the
+ * threshold, counted from the start of the watch, so the status may show silence before the household
+ * is told.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record StationStatus(Gateway gateway, LocalDateTime lastReadingAt, boolean silent) {

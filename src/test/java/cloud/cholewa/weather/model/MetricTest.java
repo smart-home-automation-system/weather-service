@@ -44,6 +44,13 @@ class MetricTest {
             "temperature", "uv", "windDirection", "precipitation");
     }
 
+    //the history reads the column of each metric: every one has its own
+    @Test
+    void should_name_a_column_of_weather_reading_for_every_metric() {
+        assertThat(Metric.values()).extracting(Metric::column).doesNotContainNull().doesNotHaveDuplicates();
+        assertThat(Metric.values()).filteredOn(Metric::isAngle).containsExactly(Metric.WIND_DIRECTION);
+    }
+
     @ParameterizedTest
     @CsvSource({"dewPoint, DEW_POINT", "raining, RAIN", "windDirection, WIND_DIRECTION"})
     void should_find_a_metric_by_its_api_name(final String name, final Metric metric) {
