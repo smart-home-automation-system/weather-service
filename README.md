@@ -47,7 +47,9 @@ Everything is non-blocking (Spring WebFlux / Reactor):
   of the station - temperature, humidity, dew point, pressure, illuminance, UV index, wind speed and
   gust, wind direction, rain, precipitation, battery, voltage (13 metrics) - and which
   `bthomedevice:<id>` is the station. Read when the station or the gateway changes, once an hour,
-  and at the next refresh after a sensor the map does not know.
+  and at the next refresh after a sensor the map does not know. Each read also brings what every
+  sensor holds now into the current state - a value that never changes (the battery, the rain for
+  days) is never published, and would otherwise stay unknown.
 - **Device events** arrive from RabbitMQ, virtual host `/device` (user `device`), queue
   `device.prod.weather` (`device.dev.weather` in the `local` profile). The queue is bound to
   `amq.topic` with `#` - every event of every device, about 130 a minute; the routing key decides

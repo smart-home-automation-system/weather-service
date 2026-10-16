@@ -61,6 +61,9 @@ the service code) holds everywhere else.
   backwards the night the clocks go back; the same reading again changes nothing, an older one is
   dropped. The packets of the WS90 come in two kinds in turn (A: light, rain, wind, gust, UV,
   direction; B: the rest) and the sensors of one packet differ by 1-2 s, so nothing groups by packet.
+  A value that never changes is never published either: every read of the map (`Shelly.GetComponents`
+  lists the status with the config) brings what each sensor holds now into the state - HAS-236
+  0.2.0 had only the metrics that changed since the start in its first rows.
 - **A row a minute, after a change only** (`WeatherSnapshot`, the "insert on a change" rule of the
   status tables): a snapshot of the whole state, `measured_at` the newest measurement in it, house
   time. Nothing is stored before the state was restored from the latest row (a partial row would
