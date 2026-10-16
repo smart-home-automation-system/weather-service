@@ -45,22 +45,23 @@ public class WeatherStation {
     //what the registry had twice, as last said at WARN - said again only when it changes
     private final AtomicReference<String> duplicates = new AtomicReference<>("");
 
-    //null until the first successful read of the registry; an empty Optional is "no station"
-    private final AtomicReference<Optional<Station>> station = new AtomicReference<>();
+    //null while there is no station: before the first successful read of the registry, and after a
+    //read without one (registryRead tells the two apart, for the log)
+    private final AtomicReference<Station> station = new AtomicReference<>();
+    private final AtomicBoolean registryRead = new AtomicBoolean();
     private final AtomicReference<Sensors> sensors = new AtomicReference<>();
 
     public Mono<Void> refresh() {
         return Mono.defer(this::readRegistry)
             .doOnError(e -> log.warn("Refresh of the weather station from the device registry failed, the last one stays: {}",
                 e.toString()))
-            .onErrorResume(e -> station.get() == null ? Mono.empty() : Mono.just(station.get()))
+            .onErrorResume(e -> Mono.justOrEmpty(station.get()).map(Optional::of))
             .flatMap(Mono::justOrEmpty)
             .flatMap(this::readSensorsWhenDue);
     }
 
     public Optional<Station> station() {
-        final Optional<Station> known = station.get();
-        return known == null ? Optional.empty() : known;
+        return Optional.ofNullable(station.get());
     }
 
     //a sensor the map does not know: the gateway is asked again at the next refresh, not at once -
@@ -85,9 +86,10 @@ public class WeatherStation {
                 return StationMapper.toStation(lists.getT1(), lists.getT2());
             })
             .doOnNext(read -> {
-                final Optional<Station> previous = station.getAndSet(read);
-                if (!read.equals(previous)) {
-                    if (previous != null && previous.isPresent()) {
+                final Station previous = station.getAndSet(read.orElse(null));
+                final boolean first = !registryRead.getAndSet(true);
+                if (first || !read.equals(Optional.ofNullable(previous))) {
+                    if (previous != null) {
                         currentWeather.clear();
                     }
                     read.ifPresentOrElse(
