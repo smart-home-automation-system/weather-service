@@ -21,7 +21,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.util.EnumMap;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,7 +51,8 @@ public class SensorMapLoader {
     private final ShellyRpcClient shellyRpcClient;
     //a firmware adds fields to a config, and the models have only what is read here
     private final JsonMapper jsonMapper;
-    //what the last read said at WARN
+    //what the last read said at WARN, by what it was about - not by its text, which may quote a value
+    //that changes from read to read
     private final AtomicReference<Set<String>> warned = new AtomicReference<>(Set.of());
 
     public SensorMapLoader(final ShellyRpcClient shellyRpcClient, final JsonMapper jsonMapper) {
@@ -62,7 +63,7 @@ public class SensorMapLoader {
     public Mono<SensorsRead> load(final Station station) {
         return shellyRpcClient.dynamicComponents(station.gatewayAddress())
             .map(components -> {
-                final Set<String> warnings = new LinkedHashSet<>();
+                final Map<String, String> warnings = new LinkedHashMap<>();
                 final Map<Integer, Metric> sensors = sensors(components, station, warnings);
                 final Optional<ShellyComponent> device = device(components, station, warnings);
                 final SensorsRead read = new SensorsRead(
@@ -71,8 +72,12 @@ public class SensorMapLoader {
                     readings(components, sensors, warnings),
                     device.flatMap(component -> as(component, component.getStatus(), BthomeDeviceStatus.class, warnings))
                         .orElse(null));
-                final Set<String> before = warned.getAndSet(Set.copyOf(warnings));
-                warnings.stream().filter(warning -> !before.contains(warning)).forEach(log::warn);
+                final Set<String> before = warned.getAndSet(Set.copyOf(warnings.keySet()));
+                warnings.forEach((about, warning) -> {
+                    if (!before.contains(about)) {
+                        log.warn(warning);
+                    }
+                });
                 return read;
             });
     }
@@ -81,7 +86,7 @@ public class SensorMapLoader {
     //old component) give the newer reading. A value of the wrong type is said at WARN by the router,
     //when the sensor publishes - not on every read of the map
     private Map<Metric, Reading> readings(final List<ShellyComponent> components, final Map<Integer, Metric> sensors,
-                                          final Set<String> warnings) {
+                                          final Map<String, String> warnings) {
         final Map<Metric, Reading> readings = new EnumMap<>(Metric.class);
         ofKind(components, SENSOR)
             .filter(component -> sensors.containsKey(id(component)))
@@ -99,7 +104,7 @@ public class SensorMapLoader {
     //many, and none is an error of the station - and one of the station without a metric, said at
     //WARN once, here
     private Set<Integer> others(final List<ShellyComponent> components, final Map<Integer, Metric> sensors,
-                                final Set<String> warnings) {
+                                final Map<String, String> warnings) {
         return sensorConfigs(components, warnings)
             .map(BthomeSensorConfig::getId)
             .filter(id -> !sensors.containsKey(id))
@@ -107,7 +112,7 @@ public class SensorMapLoader {
     }
 
     private Map<Integer, Metric> sensors(final List<ShellyComponent> components, final Station station,
-                                         final Set<String> warnings) {
+                                         final Map<String, String> warnings) {
         final Map<Integer, Metric> sensors = new HashMap<>();
         sensorConfigs(components, warnings)
             .filter(config -> station.stationAddress().equalsIgnoreCase(config.getAddr()))
@@ -116,7 +121,8 @@ public class SensorMapLoader {
                 if (metric.isPresent()) {
                     sensors.put(config.getId(), metric.get());
                 } else {
-                    warnings.add("Sensor bthomesensor:%d of the station carries the object %s (index %s), which is no metric of the service"
+                    warnings.put("no metric " + config.getId() + " " + config.getObjId() + " " + config.getIdx(),
+                        "Sensor bthomesensor:%d of the station carries the object %s (index %s), which is no metric of the service"
                         .formatted(config.getId(), config.getObjId(), config.getIdx()));
                 }
             });
@@ -124,7 +130,7 @@ public class SensorMapLoader {
     }
 
     private Optional<ShellyComponent> device(final List<ShellyComponent> components, final Station station,
-                                             final Set<String> warnings) {
+                                             final Map<String, String> warnings) {
         return ofKind(components, DEVICE)
             .filter(component -> as(component, component.getConfig(), BthomeDeviceConfig.class, warnings)
                 .filter(config -> station.stationAddress().equalsIgnoreCase(config.getAddr()))
@@ -132,7 +138,7 @@ public class SensorMapLoader {
             .findFirst();
     }
 
-    private Stream<BthomeSensorConfig> sensorConfigs(final List<ShellyComponent> components, final Set<String> warnings) {
+    private Stream<BthomeSensorConfig> sensorConfigs(final List<ShellyComponent> components, final Map<String, String> warnings) {
         return ofKind(components, SENSOR)
             .flatMap(component -> as(component, component.getConfig(), BthomeSensorConfig.class, warnings)
                 .filter(config -> id(component).equals(config.getId()))
@@ -152,14 +158,15 @@ public class SensorMapLoader {
     }
 
     private <T> Optional<T> as(final ShellyComponent component, final Map<String, Object> raw, final Class<T> model,
-                               final Set<String> warnings) {
+                               final Map<String, String> warnings) {
         if (raw == null) {
             return Optional.empty();
         }
         try {
             return Optional.ofNullable(jsonMapper.convertValue(raw, model));
         } catch (JacksonException | IllegalArgumentException notTheModel) {
-            warnings.add("Component %s of the gateway is not a %s and is skipped: %s"
+            warnings.put(component.getKey() + " " + model.getSimpleName(),
+                "Component %s of the gateway is not a %s and is skipped: %s"
                 .formatted(component.getKey(), model.getSimpleName(), notTheModel.getMessage()));
             return Optional.empty();
         }

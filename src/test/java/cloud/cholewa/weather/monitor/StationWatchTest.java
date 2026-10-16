@@ -41,7 +41,7 @@ class StationWatchTest {
 
     private final MutableClock clock = new MutableClock(START);
     private final WeatherStation weatherStation = mock(WeatherStation.class);
-    private final CurrentWeather currentWeather = new CurrentWeather();
+    private final CurrentWeather currentWeather = new CurrentWeather(clock);
     private final StationAlertRepository repository = mock(StationAlertRepository.class);
     private final NotificationPublisher publisher = mock(NotificationPublisher.class);
     private final StationWatch sut = new StationWatch(weatherStation, currentWeather, repository, publisher,
@@ -62,7 +62,7 @@ class StationWatchTest {
         when(repository.save(any(StationAlertEntity.class))).thenAnswer(invocation -> Mono.fromCallable(() -> {
             final StationAlertEntity row = invocation.getArgument(0);
             final StationAlertEntity saved = row.id() == null
-                ? new StationAlertEntity(ids.incrementAndGet(), row.watch(), row.since(), row.lastAlertAt())
+                ? new StationAlertEntity(ids.incrementAndGet(), row.stationId(), row.watch(), row.since(), row.lastAlertAt())
                 : row;
             rows.put(saved.id(), saved);
             return saved;
@@ -93,7 +93,7 @@ class StationWatchTest {
 
         verify(publisher).publishAlert("The weather station WS90 has sent no reading since 2026-10-16 10:00 (30 min).");
         assertThat(rows.values()).singleElement()
-            .isEqualTo(new StationAlertEntity(1L, Watch.STATION, START, START.plus(Duration.ofMinutes(30))));
+            .isEqualTo(new StationAlertEntity(1L, 55L, Watch.STATION, START, START.plus(Duration.ofMinutes(30))));
     }
 
     @Test
@@ -138,7 +138,8 @@ class StationWatchTest {
 
         sut.check().as(StepVerifier::create).verifyComplete();
 
-        verify(publisher).publishAlert("The weather station WS90 has sent no reading since 2026-10-16 10:00 (30 min).");
+        verify(publisher).publishAlert(
+            "The weather station WS90 has sent no reading since the service started watching it at 2026-10-16 10:00 (30 min).");
     }
 
     @Test
@@ -156,7 +157,7 @@ class StationWatchTest {
 
     @Test
     void should_say_once_when_the_gateway_answers_again() {
-        rows.put(1L, new StationAlertEntity(1L, Watch.GATEWAY, START, START.plus(Duration.ofMinutes(30))));
+        rows.put(1L, new StationAlertEntity(1L, 55L, Watch.GATEWAY, START, START.plus(Duration.ofMinutes(30))));
         clock.move(Duration.ofMinutes(40));
         currentWeather.heard(clock.instant());
 
@@ -167,10 +168,37 @@ class StationWatchTest {
         assertThat(rows).isEmpty();
     }
 
+    //heard again and silent again while the pod was away: the old outage is over, a new one comes next
+    @Test
+    void should_end_the_alert_when_heard_after_it_even_if_silent_again() {
+        rows.put(1L, new StationAlertEntity(1L, 55L, Watch.STATION, START.minus(Duration.ofHours(3)), START.minus(Duration.ofHours(2))));
+        currentWeather.heard(START.minus(Duration.ofHours(2)));
+
+        sut.check().block();
+        verify(publisher).publishInfo(anyString());
+        verify(publisher, never()).publishReminder(anyString());
+        assertThat(rows).isEmpty();
+
+        sut.check().block();
+        verify(publisher).publishAlert("The weather station WS90 has sent no reading since 2026-10-16 08:00 (2 h 0 min).");
+    }
+
+    //an alert about a station the registry no longer has says nothing about the new one
+    @Test
+    void should_close_an_alert_of_another_station_without_a_word() {
+        rows.put(1L, new StationAlertEntity(1L, 70L, Watch.STATION, START.minus(Duration.ofHours(3)), START.minus(Duration.ofHours(2))));
+        currentWeather.heard(START);
+
+        sut.check().as(StepVerifier::create).verifyComplete();
+
+        verifyNoInteractions(publisher);
+        assertThat(rows).isEmpty();
+    }
+
     //a restart in the middle of an outage: the row says it was told already
     @Test
     void should_go_on_with_the_reminders_after_a_restart() {
-        rows.put(1L, new StationAlertEntity(1L, Watch.STATION, START.minus(Duration.ofHours(2)), START.minus(Duration.ofMinutes(30))));
+        rows.put(1L, new StationAlertEntity(1L, 55L, Watch.STATION, START.minus(Duration.ofHours(2)), START.minus(Duration.ofMinutes(30))));
         currentWeather.heard(START.minus(Duration.ofHours(2)));
 
         sut.check().block();
@@ -185,7 +213,7 @@ class StationWatchTest {
     //over means a sign of life after the start of the alert: a new station not heard yet ends nothing
     @Test
     void should_end_no_alert_without_a_sign_of_life() {
-        rows.put(1L, new StationAlertEntity(1L, Watch.STATION, START.minus(Duration.ofHours(2)), START.minus(Duration.ofMinutes(10))));
+        rows.put(1L, new StationAlertEntity(1L, 55L, Watch.STATION, START.minus(Duration.ofHours(2)), START.minus(Duration.ofMinutes(10))));
 
         sut.check().as(StepVerifier::create).verifyComplete();
 

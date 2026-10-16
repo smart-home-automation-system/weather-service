@@ -104,7 +104,8 @@ public class WeatherEventRouter {
         if (sensors.others().contains(topic.index())) {
             return;
         }
-        if (warnedFor.get() != sensors) {
+        //by content: every read of the gateway (every five minutes) builds the map anew
+        if (!sensors.equals(warnedFor.get())) {
             warnedFor.set(sensors);
             warned.clear();
         }

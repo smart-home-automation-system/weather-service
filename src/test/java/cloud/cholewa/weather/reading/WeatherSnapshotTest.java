@@ -30,7 +30,7 @@ class WeatherSnapshotTest {
     private static final Instant AT = Instant.parse("2026-10-16T07:21:28Z");
     private static final Clock CLOCK = Clock.fixed(AT, ZoneId.of("Europe/Warsaw"));
 
-    private final CurrentWeather currentWeather = new CurrentWeather();
+    private final CurrentWeather currentWeather = new CurrentWeather(CLOCK);
     private final WeatherReadingRepository repository = mock(WeatherReadingRepository.class);
     private final WeatherSnapshot sut = new WeatherSnapshot(currentWeather, repository, CLOCK);
 

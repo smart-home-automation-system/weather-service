@@ -61,13 +61,14 @@ class StationAlertRepositoryTest {
     //the night the clocks go back: an instant stays the instant it was
     @Test
     void should_store_an_alert_as_it_was_raised() {
-        final StationAlertEntity alert = new StationAlertEntity(null, Watch.GATEWAY, SINCE, SINCE.plusSeconds(1800));
+        final StationAlertEntity alert = new StationAlertEntity(null, 55L, Watch.GATEWAY, SINCE, SINCE.plusSeconds(1800));
 
         final StationAlertEntity saved = sut.save(alert).block();
 
         sut.findAll().as(StepVerifier::create)
             .assertNext(read -> {
                 assertThat(read.id()).isEqualTo(saved.id());
+                assertThat(read.stationId()).isEqualTo(55L);
                 assertThat(read.watch()).isEqualTo(Watch.GATEWAY);
                 assertThat(read.since()).isEqualTo(SINCE);
                 assertThat(read.lastAlertAt()).isEqualTo(SINCE.plusSeconds(1800));
@@ -77,9 +78,9 @@ class StationAlertRepositoryTest {
 
     @Test
     void should_keep_one_alert_per_watch() {
-        sut.save(new StationAlertEntity(null, Watch.STATION, SINCE, SINCE)).block();
+        sut.save(new StationAlertEntity(null, 55L, Watch.STATION, SINCE, SINCE)).block();
 
-        sut.save(new StationAlertEntity(null, Watch.STATION, SINCE, SINCE)).as(StepVerifier::create)
+        sut.save(new StationAlertEntity(null, 55L, Watch.STATION, SINCE, SINCE)).as(StepVerifier::create)
             .verifyError(DataIntegrityViolationException.class);
     }
 }

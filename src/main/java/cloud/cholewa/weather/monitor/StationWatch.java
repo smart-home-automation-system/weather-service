@@ -35,13 +35,15 @@ import java.util.concurrent.atomic.AtomicReference;
  * </ul>
  * Without a sign of life since the start - or since another station replaced the last one - the time
  * is counted from then. Over means a sign of life after the start of the alert, nothing less: a new
- * station not heard yet ends nothing.
+ * station not heard yet ends nothing. A sign of life after the start of an alert ends it even when the
+ * station is silent again by the pass that sees it (the pod was away) - the next pass opens a new one.
  * <p>
  * The open alerts are rows of station_alert, so a restart in the middle of an outage goes on with
  * the reminders. The notification goes first, the row after it: when the write fails, the next pass
  * repeats the message - a duplicate, never a silence. A notification must neither fail nor stall the
  * pass: each watch is cut off after {@link #PUBLISH_TIMEOUT} and its error is logged and swallowed;
- * the state moves on only once the broker has taken the message. Without a station (the registry has
+ * the state moves on only once the broker has taken the message. A row is of one station: an alert about
+ * a station the registry no longer has is closed without a word. Without a station (the registry has
  * none) nothing is judged and the rows stay.
  */
 @Slf4j
@@ -75,6 +77,7 @@ public class StationWatch {
                 final Instant now = clock.instant();
                 final Instant watchedSince = watchedSince(station, now);
                 return stationAlertRepository.findAll()
+                    .filterWhen(alert -> ofThisStation(alert, station))
                     .collectMap(StationAlertEntity::watch)
                     .flatMap(alerts -> Flux.concat(
                             judge(Watch.STATION, station, currentWeather.heardAt().orElse(null), watchedSince, alerts, now),
@@ -84,6 +87,17 @@ public class StationWatch {
             .doOnError(e -> log.warn("The open alerts about the weather station could not be read, checked again with the next pass: {}",
                 e.toString()))
             .onErrorComplete();
+    }
+
+    //an alert about a station the registry no longer has is closed without a word: no reading of the new
+    //one says anything about the outage of the old one
+    private Mono<Boolean> ofThisStation(final StationAlertEntity alert, final Station station) {
+        if (alert.stationId() == station.stationId()) {
+            return Mono.just(true);
+        }
+        log.info("The {} alert about the weather station {} (since {}) is closed: the registry has the station {} now",
+            alert.watch(), alert.stationId(), alert.since(), station.stationId());
+        return stationAlertRepository.delete(alert).thenReturn(false);
     }
 
     private Instant watchedSince(final Station station, final Instant now) {
@@ -103,18 +117,21 @@ public class StationWatch {
         final Instant quietSince = lastSign != null ? lastSign : watchedSince;
         final boolean silent = !quietSince.plus(properties.silentAfter()).isAfter(now);
 
+        //a sign of life after the start of the alert ends it first, even when it is silent again by now
+        //(passes missed while the pod was away): the next pass opens a new one, counted from that sign
         final Mono<Void> due;
-        if (silent && alert == null) {
-            due = notificationPublisher.publishAlert(alertText(watch, station, quietSince, now))
-                .then(stationAlertRepository.save(new StationAlertEntity(null, watch, quietSince, now)))
+        if (alert != null && lastSign != null && lastSign.isAfter(alert.since())) {
+            due = notificationPublisher.publishInfo(recoveryText(watch, station, alert.since(), lastSign))
+                .then(stationAlertRepository.delete(alert));
+        } else if (silent && alert == null) {
+            due = notificationPublisher.publishAlert(alertText(watch, station, quietSince, lastSign != null, now))
+                .then(stationAlertRepository.save(new StationAlertEntity(null, station.stationId(), watch, quietSince, now)))
                 .then();
         } else if (silent && !alert.lastAlertAt().plus(properties.reminderInterval()).isAfter(now)) {
             due = notificationPublisher.publishReminder(reminderText(watch, station, alert.since(), now))
-                .then(stationAlertRepository.save(new StationAlertEntity(alert.id(), watch, alert.since(), now)))
+                .then(stationAlertRepository.save(
+                    new StationAlertEntity(alert.id(), alert.stationId(), watch, alert.since(), now)))
                 .then();
-        } else if (!silent && alert != null && lastSign != null && lastSign.isAfter(alert.since())) {
-            due = notificationPublisher.publishInfo(recoveryText(watch, station, alert.since(), lastSign))
-                .then(stationAlertRepository.delete(alert));
         } else {
             due = Mono.empty();
         }
@@ -126,12 +143,20 @@ public class StationWatch {
             .onErrorComplete();
     }
 
-    private String alertText(final Watch watch, final Station station, final Instant since, final Instant now) {
+    //heard false: no sign of life since the watch started - the outage may be older, and the text says so
+    private String alertText(
+        final Watch watch,
+        final Station station,
+        final Instant since,
+        final boolean heard,
+        final Instant now
+    ) {
+        final String from = (heard ? "since %s" : "since the service started watching it at %s").formatted(time(since));
         return switch (watch) {
-            case STATION -> "The weather station %s has sent no reading since %s (%s)."
-                .formatted(station.stationName(), time(since), span(since, now));
-            case GATEWAY -> "The gateway %s of the weather station has not answered since %s (%s)."
-                .formatted(station.gatewayDeviceId(), time(since), span(since, now));
+            case STATION -> "The weather station %s has sent no reading %s (%s)."
+                .formatted(station.stationName(), from, span(since, now));
+            case GATEWAY -> "The gateway %s of the weather station has not answered %s (%s)."
+                .formatted(station.gatewayDeviceId(), from, span(since, now));
         };
     }
 

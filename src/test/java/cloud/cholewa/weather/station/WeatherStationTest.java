@@ -50,7 +50,7 @@ class WeatherStationTest {
     private final DeviceRegistryClient registry = mock(DeviceRegistryClient.class);
     private final SensorMapLoader loader = mock(SensorMapLoader.class);
     private final MutableClock clock = new MutableClock(Instant.parse("2026-10-16T08:00:00Z"));
-    private final CurrentWeather currentWeather = new CurrentWeather();
+    private final CurrentWeather currentWeather = new CurrentWeather(clock);
     private final WeatherStation sut = new WeatherStation(registry, loader, currentWeather, clock);
 
     @BeforeEach

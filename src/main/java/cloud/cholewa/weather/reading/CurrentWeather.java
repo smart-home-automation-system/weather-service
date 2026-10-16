@@ -3,9 +3,12 @@ package cloud.cholewa.weather.reading;
 import cloud.cholewa.weather.model.Metric;
 import cloud.cholewa.weather.model.Reading;
 import cloud.cholewa.weather.model.StationLink;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumMap;
 import java.util.Map;
@@ -24,11 +27,18 @@ import java.util.concurrent.atomic.AtomicReference;
 //taken or not - the same value again at a later time is no change, but it is the station heard - and
 //so does the last_updated_ts of its bthomedevice. The watch over the station (StationWatch) judges
 //silence by it; the time is the station's, so a reading that arrives late is not a sign of life now.
+//A time ahead of the clock of the pod by more than a minute is not taken: the gateway with a clock gone
+//wrong once would otherwise hold heardAt in the future, and a dead station would never be reported.
 //The listener runs on several threads (prefetch 3), hence one lock for the map - a reading of one
 //metric and a snapshot of all of them must not interleave
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class CurrentWeather {
+
+    static final Duration CLOCK_TOLERANCE = Duration.ofMinutes(1);
+
+    private final Clock clock;
 
     private final Map<Metric, Reading> readings = new EnumMap<>(Metric.class);
     private boolean changedSinceSnapshot;
@@ -108,6 +118,10 @@ public class CurrentWeather {
 
     //the station was heard at this time (its own) - only a later time moves heardAt
     public void heard(final Instant at) {
+        if (at.isAfter(clock.instant().plus(CLOCK_TOLERANCE))) {
+            log.debug("The station was heard at {} by the clock of the gateway, ahead of the service - not taken", at);
+            return;
+        }
         heardAt.accumulateAndGet(at, (held, next) -> held == null || next.isAfter(held) ? next : held);
     }
 

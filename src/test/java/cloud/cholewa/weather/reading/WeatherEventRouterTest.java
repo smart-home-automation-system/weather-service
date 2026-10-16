@@ -44,7 +44,7 @@ class WeatherEventRouterTest {
     private static final Instant MEASURED = Instant.parse("2026-10-16T07:21:28Z");
 
     private final WeatherStation weatherStation = mock(WeatherStation.class);
-    private final CurrentWeather currentWeather = new CurrentWeather();
+    private final CurrentWeather currentWeather = new CurrentWeather(CLOCK);
     private final ListAppender<ILoggingEvent> routerLog = new ListAppender<>();
     private final WeatherEventRouter sut = new WeatherEventRouter(weatherStation, currentWeather,
         new ShellyMqttDecoder(JsonMapper.builder().build()), CLOCK);

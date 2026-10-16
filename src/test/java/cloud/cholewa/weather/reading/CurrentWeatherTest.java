@@ -6,7 +6,9 @@ import cloud.cholewa.weather.model.StationLink;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.time.LocalDateTime;
 import java.util.Map;
 
@@ -16,7 +18,7 @@ class CurrentWeatherTest {
 
     private static final Instant AT = Instant.parse("2026-10-16T07:21:28Z");
 
-    private final CurrentWeather sut = new CurrentWeather();
+    private final CurrentWeather sut = new CurrentWeather(Clock.fixed(AT.plusSeconds(3600), ZoneOffset.UTC));
 
     @Test
     void should_hold_the_last_reading_of_each_metric() {
@@ -176,6 +178,16 @@ class CurrentWeatherTest {
         sut.clear();
 
         assertThat(sut.heardAt()).isEmpty();
+    }
+
+    //a gateway with its clock gone ahead must not hold the watch off
+    @Test
+    void should_not_take_a_time_ahead_of_the_clock() {
+        sut.heard(AT);
+
+        sut.heard(AT.plusSeconds(3600 + 120));
+
+        assertThat(sut.heardAt()).contains(AT);
     }
 
     private static Reading number(final String value, final Instant at) {
