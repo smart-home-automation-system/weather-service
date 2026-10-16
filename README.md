@@ -32,31 +32,42 @@ the dashboard, the blinds schedules and the overview (epic HAS-233). The station
 BTHome packets and has no Wi-Fi; a Shelly with the BTHome components adopts it and publishes the
 readings over MQTT.
 
-This release is the **skeleton** (HAS-235): the service starts, takes the events of every device
-off its queue and has its client of the device registry ready, but it reads nothing from them yet
-and has no endpoints. The readings come with HAS-236, the watch over the gateway with HAS-237 and
-the read API with HAS-238.
+Since HAS-236 the service **takes in the readings and stores them**; it has no endpoints yet - the
+read API comes with HAS-238, the watch over the gateway with HAS-237.
 
 Everything is non-blocking (Spring WebFlux / Reactor):
 
+- **The station and its gateway** come from the device registry of `database-service`: the
+  switched-on device of kind `weather station` (its Bluetooth address) and the one of kind
+  `bthome gateway` (the id it publishes under and its address), read at the start and every five
+  minutes. The registry does not bind a Bluetooth device to a gateway, so the house has one of each;
+  a second one is a WARN and the lowest id is taken. A failed read keeps the last station.
+- **The map of the sensors** comes from the gateway: `Shelly.GetComponents` (dynamic components,
+  page by page, through `shelly-client`) says which `bthomesensor:<id>` carries which BTHome object
+  of the station - temperature, humidity, dew point, pressure, illuminance, UV index, wind speed and
+  gust, wind direction, rain, precipitation, battery, voltage (13 metrics) - and which
+  `bthomedevice:<id>` is the station. Read when the station or the gateway changes, once an hour,
+  and at the next refresh after a sensor the map does not know.
 - **Device events** arrive from RabbitMQ, virtual host `/device` (user `device`), queue
   `device.prod.weather` (`device.dev.weather` in the `local` profile). The queue is bound to
-  `amq.topic` with `#`, so it gets every event of every device — the status topics of the
-  Shelly devices over MQTT and the `DeviceEvent` of the Eaton devices published by
-  `amx-service` — about 130 a minute. The listener acknowledges by hand with a prefetch of 3;
-  each event is logged at `DEBUG` and acknowledged.
-- **Notifications** go to the `notification` exchange of the virtual host `/notification`
-  over a second connection (`NotificationPublisher` of `cholewa-commons`), named
-  `<pod>/notification`.
-- **A client of `database-service`** (the device registry: the weather station and the gateway
-  that hears it), a `WebClient` over k8s DNS with its own connect and response timeouts
-  (`internal.service.database`). The gateway itself is called through `shelly-client`.
+  `amq.topic` with `#` - every event of every device, about 130 a minute; the routing key decides
+  before any body is read. `<gateway>.status.bthomesensor:<id>` of a sensor of the station updates
+  the **current state in memory**: per metric the last value and when the station measured it. The
+  gateway publishes a sensor only when its value changes, so the state is made of the changes; the
+  same reading again or an older one changes nothing. A sensor of another Bluetooth device on the
+  gateway is ignored without a word, one the map does not have is a WARN (once) and the map is read
+  again. `<gateway>.status.bthomedevice:<id>` gives the signal and the battery of the station.
+- **Once a minute** the state becomes a row of `weather_reading` - only when something changed since
+  the last row; each row is logged at INFO. At the start the state is restored from the latest row
+  before anything is stored, and when the pod stops the state is stored once more.
+- **Notifications** go to the `notification` exchange of the virtual host `/notification` over a
+  second connection (`NotificationPublisher` of `cholewa-commons`), named `<pod>/notification` -
+  none is sent yet (HAS-237).
 
 # Run locally
 
-- Build: `mvn verify` (JDK 21). No test needs Docker yet; the Testcontainers dependencies are
-  there for the first repository test of PostgreSQL-only SQL, and from then on `mvn verify`
-  needs a running Docker.
+- Build: `mvn verify` (JDK 21) - needs a running Docker: the repository test runs on a PostgreSQL
+  in Testcontainers, the migration included.
 - Ports: local profile `6010` (management `8010`); in the deployed `home` profile the service
   listens on `6200` and Actuator on `8200` like every service in the cluster. The probes hit
   `/actuator/health/{readiness,liveness}` and Prometheus scrapes `/actuator/prometheus`.
@@ -65,12 +76,14 @@ Everything is non-blocking (Spring WebFlux / Reactor):
   consumes nor publishes. In the `home` profile both variables are mandatory — without one
   the service does not start (`cholewa.required-properties` of `cholewa-commons`), and says
   which one to set.
-- `database-service` is called on its local port 6005.
+- `database-service` is called on its local port 6005; a local run reads the real gateway named in
+  the registry (`Shelly.GetComponents`, reads only).
 - The database connection properties (`database-host`, `database-port`, `database-name`,
   `database-user`, `database-password`) are bound to the `database.*` prefix that
   `cholewa-commons` consumes; Flyway derives its JDBC URL from them (`--flyway-url=...`
   overrides it). Only `database.pool.max-size: 2` is pinned here, this service's share of the
-  22 backend connections of the managed database.
+  22 backend connections of the managed database. **With the real values a local run writes to the
+  production database** - rehearse on a throwaway PostgreSQL instead (CLAUDE.md).
 
 # API
 
@@ -81,4 +94,10 @@ service is not routed by `api-gateway-service` (HAS-239).
 
 - **Own database** `home-automation-weather` on the managed PostgreSQL, reactive access via
   `r2dbc-postgresql`, migrations by Flyway from `src/main/resources/db/migration`.
-- **No schema yet**: the first migration (`V1__weather_reading.sql`) comes with HAS-236.
+- `V1__weather_reading.sql` - `weather_reading`: a snapshot of the current state, at most one row a
+  minute and only after a change. `measured_at` is the newest measurement in the row (house time);
+  a metric never received is NULL; a value that does not fit its column is stored as NULL (WARN).
+  Columns: `temperature` (°C, 0.1), `humidity` (%), `dew_point` (°C, 0.01), `pressure` (hPa at
+  the station, 0.01), `illuminance` (lx), `uv` (0.1), `wind` and `gust` (m/s, 0.01),
+  `wind_direction` (°), `raining`, `precipitation` (the running total of the station - its unit is
+  checked before HAS-238 shows it), `battery` (%), `voltage` (V, 0.01). No retention yet (HAS-238).
