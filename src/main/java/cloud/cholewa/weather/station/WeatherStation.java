@@ -2,6 +2,7 @@ package cloud.cholewa.weather.station;
 
 import cloud.cholewa.home.model.DeviceKind;
 import cloud.cholewa.weather.model.Station;
+import cloud.cholewa.weather.model.StationLink;
 import cloud.cholewa.weather.model.StationSensors;
 import cloud.cholewa.weather.reading.CurrentWeather;
 import cloud.cholewa.weather.registry.DeviceRegistryClient;
@@ -14,6 +15,7 @@ import reactor.core.publisher.Mono;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -23,7 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 //when the station or its gateway changes, while there is none, once an hour, and at the next refresh
 //after a status of a sensor the map does not know (requestSensors) - a re-pairing gives the sensors
 //other ids, and the gateway says nothing about it on the broker (no events/rpc). Another station or
-///gateway clears the current state: what the last one measured is not a reading of this one. Every
+//gateway clears the current state: what the last one measured is not a reading of this one. Every
 //read of the map also brings what each sensor holds now into the state - a value that never changes
 //(the battery, the rain for days) would otherwise never be known.
 //A failed read keeps what was known: a database-service or a gateway away for a moment must not make
@@ -124,8 +126,11 @@ public class WeatherStation {
                 if (previous == null || !previous.sensors().equals(loaded)) {
                     log.info("Sensors of the weather station on the gateway {}: {}", known.gatewayDeviceId(), loaded);
                 }
-                //an older reading than the one held is dropped, the same one changes nothing
-                gateway.readings().forEach(currentWeather::observe);
+                gateway.readings().forEach(currentWeather::seed);
+                if (gateway.device() != null && currentWeather.link().isEmpty()) {
+                    currentWeather.link(new StationLink(gateway.device().getRssi(), gateway.device().getBattery(),
+                        gateway.device().getPacketId(), LocalDateTime.now(clock)));
+                }
             })
             .doOnError(e -> {
                 sensorsRequested.set(true);

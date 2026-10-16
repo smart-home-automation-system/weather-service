@@ -111,6 +111,46 @@ class SensorMapLoaderTest {
             .verifyComplete();
     }
 
+    //one odd component must not cost the whole map: a status that is not the model is skipped
+    @Test
+    void should_skip_a_status_that_is_not_the_model() {
+        gateway.enqueue(page(0, 2, 27,
+            "{\"key\":\"bthomesensor:200\",\"status\":{\"id\":200,\"value\":100,\"last_updated_ts\":\"soon\"},"
+                + "\"config\":{\"id\":200,\"addr\":\"" + STATION + "\",\"obj_id\":1,\"idx\":0}}",
+            sensor(205, STATION, 0x45, 0)));
+
+        sut.load(station).as(StepVerifier::create)
+            .assertNext(read -> {
+                assertThat(read.sensors().sensors()).containsOnlyKeys(200, 205);
+                assertThat(read.readings()).isEmpty();
+            })
+            .verifyComplete();
+    }
+
+    //a re-pairing that left the old component: two sensors of one metric give the newer reading
+    @Test
+    void should_take_the_newer_of_two_sensors_of_one_metric() {
+        gateway.enqueue(page(0, 2, 27,
+            "{\"key\":\"bthomesensor:215\",\"status\":{\"id\":215,\"value\":4.4,\"last_updated_ts\":1792135288},"
+                + "\"config\":{\"id\":215,\"addr\":\"" + STATION + "\",\"obj_id\":69,\"idx\":0}}",
+            "{\"key\":\"bthomesensor:205\",\"status\":{\"id\":205,\"value\":12.0,\"last_updated_ts\":1792000000},"
+                + "\"config\":{\"id\":205,\"addr\":\"" + STATION + "\",\"obj_id\":69,\"idx\":0}}"));
+
+        sut.load(station).as(StepVerifier::create)
+            .assertNext(read -> assertThat(read.readings()).containsExactlyEntriesOf(Map.of(
+                Metric.TEMPERATURE, Reading.number(new BigDecimal("4.4"), Instant.ofEpochSecond(1792135288)))))
+            .verifyComplete();
+    }
+
+    @Test
+    void should_give_the_status_of_the_device_of_the_station() {
+        gateway.enqueue(page(0, 1, 27, device(200, STATION)));
+
+        sut.load(station).as(StepVerifier::create)
+            .assertNext(read -> assertThat(read.device().getRssi()).isEqualTo(-73))
+            .verifyComplete();
+    }
+
     //a component sent with "config": null is left out, not a failed map
     @Test
     void should_skip_a_component_without_its_config() {

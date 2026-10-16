@@ -5,6 +5,8 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import cloud.cholewa.home.model.DeviceKind;
+import cloud.cholewa.shelly.model.BthomeDeviceStatus;
+import cloud.cholewa.weather.model.StationLink;
 import cloud.cholewa.weather.model.Reading;
 import cloud.cholewa.weather.model.SensorsRead;
 import cloud.cholewa.weather.reading.CurrentWeather;
@@ -43,7 +45,7 @@ class WeatherStationTest {
 
     private static final StationSensors SENSORS = new StationSensors(Map.of(205, Metric.TEMPERATURE), Set.of(), 200);
 
-    private static final SensorsRead READ = new SensorsRead(SENSORS, Map.of());
+    private static final SensorsRead READ = new SensorsRead(SENSORS, Map.of(), null);
 
     private final DeviceRegistryClient registry = mock(DeviceRegistryClient.class);
     private final SensorMapLoader loader = mock(SensorMapLoader.class);
@@ -159,12 +161,23 @@ class WeatherStationTest {
     @Test
     void should_bring_what_the_sensors_hold_now_into_the_state() {
         final Reading battery = Reading.number(new BigDecimal("100"), clock.instant());
-        when(loader.load(any())).thenReturn(Mono.just(new SensorsRead(SENSORS, Map.of(Metric.BATTERY, battery))));
+        when(loader.load(any())).thenReturn(Mono.just(new SensorsRead(SENSORS, Map.of(Metric.BATTERY, battery), null)));
 
         sut.refresh().block();
 
         assertThat(currentWeather.readings()).containsEntry(Metric.BATTERY, battery);
         assertThat(currentWeather.takeSnapshot()).isPresent();
+    }
+
+    //the signal and the battery of the station come with the read of the map too, until it publishes
+    @Test
+    void should_know_the_link_of_the_station_from_the_read_of_the_map() {
+        when(loader.load(any())).thenReturn(Mono.just(new SensorsRead(SENSORS, Map.of(),
+            BthomeDeviceStatus.builder().id(200).rssi(-73).battery(100).packetId(129).build())));
+
+        sut.refresh().block();
+
+        assertThat(currentWeather.link()).map(StationLink::rssi).contains(-73);
     }
 
     //what the last station measured is not a reading of the new one

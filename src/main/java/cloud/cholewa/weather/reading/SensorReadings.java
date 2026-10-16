@@ -20,6 +20,11 @@ import java.util.Optional;
 public final class SensorReadings {
 
     public static Optional<Reading> of(final Metric metric, final BthomeSensorStatus status) {
+        return of(metric, status, true);
+    }
+
+    //warn false: the read of the map, which repeats every hour - the router says it when the sensor publishes
+    public static Optional<Reading> of(final Metric metric, final BthomeSensorStatus status, final boolean warn) {
         final Object value = status.getValue();
         final Long timestamp = status.getLastUpdatedTs();
         if (value == null || timestamp == null || timestamp <= 0) {
@@ -32,8 +37,10 @@ public final class SensorReadings {
         if (!metric.isFlag() && value instanceof Number number) {
             return Optional.of(Reading.number(new BigDecimal(number.toString()), measuredAt));
         }
-        log.warn("Sensor bthomesensor:{} ({}) sent the value {}, which is not what that metric is",
-            status.getId(), metric, value);
+        if (warn) {
+            log.warn("Sensor bthomesensor:{} ({}) sent the value {}, which is not what that metric is",
+                status.getId(), metric, value);
+        }
         return Optional.empty();
     }
 }

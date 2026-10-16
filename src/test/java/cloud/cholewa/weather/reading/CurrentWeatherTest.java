@@ -75,6 +75,42 @@ class CurrentWeatherTest {
         assertThat(sut.takeSnapshot()).isEmpty();
     }
 
+    //a read of the map: what is not held yet is taken - and is a change
+    @Test
+    void should_seed_a_metric_not_held_yet() {
+        assertThat(sut.seed(Metric.BATTERY, number("100", AT))).isTrue();
+        assertThat(sut.takeSnapshot()).isPresent();
+    }
+
+    //the gateway may move the time of a sensor without publishing it: the same value later is no
+    //change, and no row
+    @Test
+    void should_not_seed_the_same_value_at_a_later_time() {
+        sut.observe(Metric.BATTERY, number("100", AT));
+        sut.takeSnapshot();
+
+        assertThat(sut.seed(Metric.BATTERY, number("100", AT.plusSeconds(3600)))).isFalse();
+        assertThat(sut.takeSnapshot()).isEmpty();
+        assertThat(sut.readings()).containsEntry(Metric.BATTERY, number("100", AT));
+    }
+
+    //the map may have been answered before an event of the same second: the event stays
+    @Test
+    void should_never_seed_over_a_reading_of_the_same_second_or_older() {
+        sut.observe(Metric.WIND, number("1.4", AT));
+
+        assertThat(sut.seed(Metric.WIND, number("1.1", AT))).isFalse();
+        assertThat(sut.seed(Metric.WIND, number("1.0", AT.minusSeconds(9)))).isFalse();
+        assertThat(sut.readings()).containsEntry(Metric.WIND, number("1.4", AT));
+    }
+
+    @Test
+    void should_seed_another_value_measured_later() {
+        sut.observe(Metric.WIND, number("1.4", AT));
+
+        assertThat(sut.seed(Metric.WIND, number("1.1", AT.plusSeconds(9)))).isTrue();
+    }
+
     @Test
     void should_take_the_snapshot_again_after_it_failed() {
         sut.observe(Metric.PRESSURE, number("993.3", AT));
