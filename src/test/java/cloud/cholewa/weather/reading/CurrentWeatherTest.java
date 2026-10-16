@@ -6,7 +6,9 @@ import cloud.cholewa.weather.model.StationLink;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.time.LocalDateTime;
 import java.util.Map;
 
@@ -16,7 +18,7 @@ class CurrentWeatherTest {
 
     private static final Instant AT = Instant.parse("2026-10-16T07:21:28Z");
 
-    private final CurrentWeather sut = new CurrentWeather();
+    private final CurrentWeather sut = new CurrentWeather(Clock.fixed(AT.plusSeconds(3600), ZoneOffset.UTC));
 
     @Test
     void should_hold_the_last_reading_of_each_metric() {
@@ -147,6 +149,45 @@ class CurrentWeatherTest {
         assertThat(sut.readings()).isEmpty();
         assertThat(sut.link()).isEmpty();
         assertThat(sut.takeSnapshot()).isEmpty();
+    }
+
+    //what the watch over the station judges by: every reading counts, taken or not
+    @Test
+    void should_know_when_the_station_was_heard_last() {
+        assertThat(sut.heardAt()).isEmpty();
+        sut.observe(Metric.BATTERY, number("100", AT));
+
+        sut.seed(Metric.BATTERY, number("100", AT.plusSeconds(600)));
+        sut.observe(Metric.WIND, number("1.1", AT.plusSeconds(60)));
+
+        assertThat(sut.heardAt()).contains(AT.plusSeconds(600));
+    }
+
+    @Test
+    void should_know_the_station_heard_from_the_restored_row() {
+        sut.restore(Map.of(Metric.TEMPERATURE, number("4.4", AT)));
+
+        assertThat(sut.heardAt()).contains(AT);
+    }
+
+    //another station: what the last one did is no sign of life of this one
+    @Test
+    void should_forget_when_the_station_was_heard_when_cleared() {
+        sut.heard(AT);
+
+        sut.clear();
+
+        assertThat(sut.heardAt()).isEmpty();
+    }
+
+    //a gateway with its clock gone ahead must not hold the watch off
+    @Test
+    void should_not_take_a_time_ahead_of_the_clock() {
+        sut.heard(AT);
+
+        sut.heard(AT.plusSeconds(3600 + 120));
+
+        assertThat(sut.heardAt()).contains(AT);
     }
 
     private static Reading number(final String value, final Instant at) {

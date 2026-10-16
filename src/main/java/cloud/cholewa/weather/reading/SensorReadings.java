@@ -1,5 +1,6 @@
 package cloud.cholewa.weather.reading;
 
+import cloud.cholewa.shelly.model.BthomeDeviceStatus;
 import cloud.cholewa.shelly.model.BthomeSensorStatus;
 import cloud.cholewa.weather.model.Metric;
 import cloud.cholewa.weather.model.Reading;
@@ -23,7 +24,14 @@ public final class SensorReadings {
         return of(metric, status, true);
     }
 
-    //warn false: the read of the map, which repeats every hour - the router says it when the sensor publishes
+    //when the gateway heard the station last, from the status of its bthomedevice - empty without a
+    //time (0 until the gateway has heard the device once)
+    public static Optional<Instant> heardAt(final BthomeDeviceStatus status) {
+        final Long timestamp = status.getLastUpdatedTs();
+        return timestamp == null || timestamp <= 0 ? Optional.empty() : Optional.of(Instant.ofEpochSecond(timestamp));
+    }
+
+    //warn false: the read of the map, which repeats every five minutes - the router says it when the sensor publishes
     public static Optional<Reading> of(final Metric metric, final BthomeSensorStatus status, final boolean warn) {
         final Object value = status.getValue();
         final Long timestamp = status.getLastUpdatedTs();

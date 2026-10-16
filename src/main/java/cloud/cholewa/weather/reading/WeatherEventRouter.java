@@ -28,9 +28,10 @@ import java.util.concurrent.atomic.AtomicReference;
 //read. The id of the gateway is matched whatever its case.
 //- <gatewayId>.status.bthomesensor:<id>: {id, value, last_updated_ts}, one sensor, published when its
 //  value changes. A sensor of another device on the gateway is ignored without a word, one the map
-//  does not have at all is said at WARN once and has the map read again (unknown()); one without a
+//  does not have at all is said at WARN once (unknown()); one without a
 //  value or a time (0 until the gateway has heard the object once) is no reading
-//- <gatewayId>.status.bthomedevice:<id>: the signal, the battery and the packet id of the station.
+//- <gatewayId>.status.bthomedevice:<id>: the signal, the battery and the packet id of the station,
+//  and when the gateway heard it last.
 //Until the station and its map are known every event is ignored - the first refresh comes at once
 //after the start. A body that is not what its topic carries is an error for the consumer to log
 @Slf4j
@@ -87,27 +88,30 @@ public class WeatherEventRouter {
             .flatMap(Mono::justOrEmpty)
             .cast(ShellyEvent.Status.class)
             .flatMap(status -> Mono.justOrEmpty(status.as(BthomeDeviceStatus.class)))
-            .doOnNext(status -> currentWeather.link(new StationLink(
-                status.getRssi(), status.getBattery(), status.getPacketId(), LocalDateTime.now(clock))))
+            .doOnNext(status -> {
+                currentWeather.link(new StationLink(
+                    status.getRssi(), status.getBattery(), status.getPacketId(), LocalDateTime.now(clock)));
+                SensorReadings.heardAt(status).ifPresent(currentWeather::heard);
+            })
             .then();
     }
 
     //A sensor of another Bluetooth device on the gateway is known and expected - there may be many,
     //and every change of each arrives here - so nothing is said. One the gateway did not have when the
-    //map was read is said at WARN once per map, and the map is read again at the next refresh: a
-    //re-pairing gives the sensors of the station other ids
+    //map was read is said at WARN once per map; the map is read again with the next refresh anyway
+    //(every five minutes): a re-pairing gives the sensors of the station other ids
     private void unknown(final ShellyTopic topic, final StationSensors sensors) {
         if (sensors.others().contains(topic.index())) {
             return;
         }
-        if (warnedFor.get() != sensors) {
+        //by content: every read of the gateway (every five minutes) builds the map anew
+        if (!sensors.equals(warnedFor.get())) {
             warnedFor.set(sensors);
             warned.clear();
         }
         if (warned.add(topic.index())) {
-            log.warn("Sensor bthomesensor:{} of the gateway {} is not on its map and is ignored; the map is read again",
+            log.warn("Sensor bthomesensor:{} of the gateway {} is not on its map and is ignored until the map is read again",
                 topic.index(), topic.deviceId());
-            weatherStation.requestSensors();
         }
     }
 }

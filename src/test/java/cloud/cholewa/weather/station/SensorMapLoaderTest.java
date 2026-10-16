@@ -1,5 +1,9 @@
 package cloud.cholewa.weather.station;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import cloud.cholewa.shelly.http.ShellyRpcClient;
 import cloud.cholewa.shelly.http.ShellyTimeouts;
 import cloud.cholewa.weather.model.Metric;
@@ -12,6 +16,7 @@ import mockwebserver3.RecordedRequest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -170,6 +175,31 @@ class SensorMapLoaderTest {
         gateway.enqueue(new MockResponse.Builder().code(500).build());
 
         sut.load(station).as(StepVerifier::create).expectError().verify();
+    }
+
+    //the gateway is read every five minutes: a WARN about the same component once, again only after a
+    //read without it
+    @Test
+    void should_say_a_sensor_without_a_metric_once() {
+        final ListAppender<ILoggingEvent> loaderLog = new ListAppender<>();
+        loaderLog.start();
+        ((Logger) LoggerFactory.getLogger(SensorMapLoader.class)).addAppender(loaderLog);
+        try {
+            gateway.enqueue(page(0, 1, 27, sensor(211, STATION, 0x99, 0)));
+            gateway.enqueue(page(0, 1, 27, sensor(211, STATION, 0x99, 0)));
+            gateway.enqueue(page(0, 1, 27, sensor(205, STATION, 0x45, 0)));
+            gateway.enqueue(page(0, 1, 27, sensor(211, STATION, 0x99, 0)));
+
+            sut.load(station).block();
+            sut.load(station).block();
+            sut.load(station).block();
+            sut.load(station).block();
+        } finally {
+            ((Logger) LoggerFactory.getLogger(SensorMapLoader.class)).detachAppender(loaderLog);
+        }
+
+        assertThat(loaderLog.list).filteredOn(event -> event.getLevel() == Level.WARN).hasSize(2)
+            .allSatisfy(event -> assertThat(event.getFormattedMessage()).contains("bthomesensor:211"));
     }
 
     private static MockResponse page(final int offset, final int total, final int revision, final String... components) {
