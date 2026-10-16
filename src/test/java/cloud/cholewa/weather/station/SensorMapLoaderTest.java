@@ -3,6 +3,8 @@ package cloud.cholewa.weather.station;
 import cloud.cholewa.shelly.http.ShellyRpcClient;
 import cloud.cholewa.shelly.http.ShellyTimeouts;
 import cloud.cholewa.weather.model.Metric;
+import cloud.cholewa.weather.model.Reading;
+import cloud.cholewa.weather.model.SensorsRead;
 import cloud.cholewa.weather.model.Station;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
@@ -17,6 +19,8 @@ import reactor.test.StepVerifier;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.Duration;
 import java.util.Map;
 
@@ -61,7 +65,7 @@ class SensorMapLoaderTest {
             sensor(211, STATION, 0x99, 0),
             sensor(300, "aa:bb:cc:dd:ee:ff", 0x45, 0)));
 
-        sut.load(station).as(StepVerifier::create)
+        sut.load(station).map(SensorsRead::sensors).as(StepVerifier::create)
             .assertNext(sensors -> {
                 assertThat(sensors.sensors()).containsExactlyInAnyOrderEntriesOf(Map.of(
                     200, Metric.BATTERY, 205, Metric.TEMPERATURE, 209, Metric.WIND, 210, Metric.GUST));
@@ -79,11 +83,31 @@ class SensorMapLoaderTest {
     void should_know_no_device_component_without_one_of_the_station() {
         gateway.enqueue(page(0, 2, 27, device(201, "aa:bb:cc:dd:ee:ff"), sensor(205, STATION, 0x45, 0)));
 
-        sut.load(station).as(StepVerifier::create)
+        sut.load(station).map(SensorsRead::sensors).as(StepVerifier::create)
             .assertNext(sensors -> {
                 assertThat(sensors.sensors()).containsExactlyEntriesOf(Map.of(205, Metric.TEMPERATURE));
                 assertThat(sensors.deviceComponent()).isNull();
             })
+            .verifyComplete();
+    }
+
+    //what each sensor of the station holds now - a value that never changes arrives only this way;
+    //a sensor never heard (value null, time 0) and one of another device bring nothing
+    @Test
+    void should_read_what_the_sensors_of_the_station_hold_now() {
+        gateway.enqueue(page(0, 4, 27,
+            "{\"key\":\"bthomesensor:200\",\"status\":{\"id\":200,\"value\":100,\"last_updated_ts\":1792135287},"
+                + "\"config\":{\"id\":200,\"addr\":\"" + STATION + "\",\"obj_id\":1,\"idx\":0}}",
+            "{\"key\":\"bthomesensor:208\",\"status\":{\"id\":208,\"value\":false,\"last_updated_ts\":1792135278},"
+                + "\"config\":{\"id\":208,\"addr\":\"" + STATION + "\",\"obj_id\":32,\"idx\":0}}",
+            sensor(205, STATION, 0x45, 0),
+            "{\"key\":\"bthomesensor:300\",\"status\":{\"id\":300,\"value\":21.5,\"last_updated_ts\":1792135287},"
+                + "\"config\":{\"id\":300,\"addr\":\"aa:bb:cc:dd:ee:ff\",\"obj_id\":69,\"idx\":0}}"));
+
+        sut.load(station).as(StepVerifier::create)
+            .assertNext(read -> assertThat(read.readings()).containsExactlyInAnyOrderEntriesOf(Map.of(
+                Metric.BATTERY, Reading.number(new BigDecimal("100"), Instant.ofEpochSecond(1792135287)),
+                Metric.RAIN, Reading.flag(false, Instant.ofEpochSecond(1792135278)))))
             .verifyComplete();
     }
 
@@ -94,7 +118,7 @@ class SensorMapLoaderTest {
             "{\"key\":\"bthomesensor:206\",\"status\":{\"id\":206},\"config\":null}",
             sensor(205, STATION, 0x45, 0)));
 
-        sut.load(station).as(StepVerifier::create)
+        sut.load(station).map(SensorsRead::sensors).as(StepVerifier::create)
             .assertNext(sensors -> assertThat(sensors.sensors()).containsExactlyEntriesOf(Map.of(205, Metric.TEMPERATURE)))
             .verifyComplete();
     }

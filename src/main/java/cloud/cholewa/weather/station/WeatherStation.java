@@ -23,7 +23,9 @@ import java.util.concurrent.atomic.AtomicReference;
 //when the station or its gateway changes, while there is none, once an hour, and at the next refresh
 //after a status of a sensor the map does not know (requestSensors) - a re-pairing gives the sensors
 //other ids, and the gateway says nothing about it on the broker (no events/rpc). Another station or
-//gateway clears the current state: what the last one measured is not a reading of this one.
+///gateway clears the current state: what the last one measured is not a reading of this one. Every
+//read of the map also brings what each sensor holds now into the state - a value that never changes
+//(the battery, the rain for days) would otherwise never be known.
 //A failed read keeps what was known: a database-service or a gateway away for a moment must not make
 //the station unknown. Until the first read the station is unknown and every event is ignored
 @Slf4j
@@ -116,11 +118,14 @@ public class WeatherStation {
             return Mono.empty();
         }
         return sensorMapLoader.load(known)
-            .doOnNext(loaded -> {
+            .doOnNext(gateway -> {
+                final StationSensors loaded = gateway.sensors();
                 final Sensors previous = sensors.getAndSet(new Sensors(known, loaded, clock.instant()));
                 if (previous == null || !previous.sensors().equals(loaded)) {
                     log.info("Sensors of the weather station on the gateway {}: {}", known.gatewayDeviceId(), loaded);
                 }
+                //an older reading than the one held is dropped, the same one changes nothing
+                gateway.readings().forEach(currentWeather::observe);
             })
             .doOnError(e -> {
                 sensorsRequested.set(true);

@@ -58,11 +58,13 @@ class WeatherEventRouterTest {
             205, Metric.TEMPERATURE, 208, Metric.RAIN, 212, Metric.WIND_DIRECTION), Set.of(240, 241), 200)));
         routerLog.start();
         ((Logger) LoggerFactory.getLogger(WeatherEventRouter.class)).addAppender(routerLog);
+        ((Logger) LoggerFactory.getLogger(SensorReadings.class)).addAppender(routerLog);
     }
 
     @AfterEach
     void tearDown() {
         ((Logger) LoggerFactory.getLogger(WeatherEventRouter.class)).detachAppender(routerLog);
+        ((Logger) LoggerFactory.getLogger(SensorReadings.class)).detachAppender(routerLog);
     }
 
     @Test

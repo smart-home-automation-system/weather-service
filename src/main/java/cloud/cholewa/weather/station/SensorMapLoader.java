@@ -3,16 +3,21 @@ package cloud.cholewa.weather.station;
 import cloud.cholewa.shelly.http.ShellyRpcClient;
 import cloud.cholewa.shelly.model.BthomeDeviceConfig;
 import cloud.cholewa.shelly.model.BthomeSensorConfig;
+import cloud.cholewa.shelly.model.BthomeSensorStatus;
 import cloud.cholewa.shelly.model.ShellyComponent;
 import cloud.cholewa.weather.model.Metric;
+import cloud.cholewa.weather.model.Reading;
+import cloud.cholewa.weather.model.SensorsRead;
 import cloud.cholewa.weather.model.Station;
 import cloud.cholewa.weather.model.StationSensors;
+import cloud.cholewa.weather.reading.SensorReadings;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +30,8 @@ import java.util.stream.Stream;
 //Shelly.GetComponents lists the dynamic components with their config (Shelly.GetStatus leaves them
 //out), a few pages of one call each. The config of a bthomesensor says the address of the device it
 //belongs to and the object it carries; the bthomedevice with the address of the station is the one
-//whose signal and battery are read. A sensor of another device on the same gateway is kept apart, to
+///whose signal and battery are read. The status listed with each sensor of the station is its reading
+//now, the only way a value that never changes reaches the service. A sensor of another device on the same gateway is kept apart, to
 //be ignored without a word; one of the station with an object the service has no metric for is said
 //at WARN. A failed read fails the whole map - half a map would make the rest of the metrics unknown
 @Slf4j
@@ -44,12 +50,26 @@ public class SensorMapLoader {
         this.jsonMapper = jsonMapper.rebuild().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).build();
     }
 
-    public Mono<StationSensors> load(final Station station) {
+    public Mono<SensorsRead> load(final Station station) {
         return shellyRpcClient.dynamicComponents(station.gatewayAddress())
             .map(components -> {
                 final Map<Integer, Metric> sensors = sensors(components, station);
-                return new StationSensors(sensors, others(components, sensors), deviceComponent(components, station));
+                return new SensorsRead(
+                    new StationSensors(sensors, others(components, sensors), deviceComponent(components, station)),
+                    readings(components, sensors));
             });
+    }
+
+    //what each sensor of the station holds now, from the status listed with it
+    private Map<Metric, Reading> readings(final List<ShellyComponent> components, final Map<Integer, Metric> sensors) {
+        final Map<Metric, Reading> readings = new EnumMap<>(Metric.class);
+        components.stream()
+            .filter(component -> component.getKey() != null && component.getKey().startsWith(SENSOR) && component.getStatus() != null)
+            .map(component -> jsonMapper.convertValue(component.getStatus(), BthomeSensorStatus.class))
+            .filter(status -> status.getId() != null && sensors.containsKey(status.getId()))
+            .forEach(status -> SensorReadings.of(sensors.get(status.getId()), status)
+                .ifPresent(reading -> readings.put(sensors.get(status.getId()), reading)));
+        return readings;
     }
 
     //every other sensor the gateway has: those of the other Bluetooth devices it hears - there may be
