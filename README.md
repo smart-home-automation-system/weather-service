@@ -33,8 +33,8 @@ BTHome packets and has no Wi-Fi; a Shelly with the BTHome components adopts it a
 readings over MQTT.
 
 Since HAS-236 the service **takes in the readings and stores them**, since HAS-237 it **reconciles
-with the gateway and tells the household when the station goes silent**; it has no endpoints yet -
-the read API comes with HAS-238.
+with the gateway and tells the household when the station goes silent**, since HAS-238 it **serves
+the current weather, the status of the station and the history** (reads only).
 
 Everything is non-blocking (Spring WebFlux / Reactor):
 
@@ -60,10 +60,13 @@ Everything is non-blocking (Spring WebFlux / Reactor):
   the **current state in memory**: per metric the last value and when the station measured it. The
   gateway publishes a sensor only when its value changes, so the state is made of the changes; the
   same reading again or an older one changes nothing. A sensor of another Bluetooth device on the
-  gateway is ignored without a word, one the map does not have is a WARN (once per map). `<gateway>.status.bthomedevice:<id>` gives the signal and the battery of the station.
+  gateway is ignored without a word, one the map does not have is a WARN (once per map).
+  `<gateway>.status.bthomedevice:<id>` gives the signal and the battery of the station.
 - **Once a minute** the state becomes a row of `weather_reading` - only when something changed since
   the last row; each row is logged at INFO. At the start the state is restored from the latest row
-  before anything is stored, and when the pod stops the state is stored once more.
+  before anything is stored, and when the pod stops the state is stored once more. **Every night at
+  03:10** the rows older than `weather.retention` (default 730 days; a bare number is days, 30 days
+  to 10 years) are deleted - never the latest one, which the state is restored from.
 - **The watch over the station** (HAS-237), after every refresh: no reading from the station for
   `weather.monitor.silent-after` (default 30 min, 10 min - 24 h) is an **alert** (level `error`),
   repeated as a **reminder** (`warn`) every `weather.monitor.reminder-interval` (default 1 h,
@@ -101,8 +104,51 @@ Everything is non-blocking (Spring WebFlux / Reactor):
 
 # API
 
-Base path `/home/weather` (`spring.webflux.base-path`). No endpoints yet (HAS-238); the
-service is not routed by `api-gateway-service` (HAS-239).
+Base path `/home/weather` (`spring.webflux.base-path`), reads only. Not routed by
+`api-gateway-service` yet (HAS-239): reachable inside the cluster or through a port-forward. Every
+date-time is house time without an offset.
+
+| Method | Path | What |
+|---|---|---|
+| GET | `/current` | per metric `{value, measuredAt, stale}` |
+| GET | `/status` | `gateway {deviceId, reachable, checkedAt}`, `lastReadingAt`, `silent` |
+| GET | `/history?metric=&from=&to=` | one metric over a range: `metric`, `from`, `to`, `bucketSeconds`, `points: [{at, avg, min, max}]` |
+
+**Metrics** (the names of `/current` and of `metric`; the unit is the one the gateway reports):
+
+| Metric | Unit | Notes |
+|---|---|---|
+| `temperature` | °C | |
+| `humidity` | % | |
+| `dewPoint` | °C | |
+| `pressure` | hPa | at the station, not reduced to sea level |
+| `illuminance` | lx | |
+| `uv` | UV index | |
+| `wind` | m/s | |
+| `gust` | m/s | |
+| `windDirection` | ° | history: the circular mean (350 and 10 average to 0), no `min` / `max` |
+| `raining` | `true` / `false` | history: 1 / 0 - `avg` is the share of the readings with rain |
+| `precipitation` | **not confirmed** | the running total of the station as the gateway reports it (4311 in October 2026); compare with the app on the first rain. History: `max - min` of a bucket is its rain |
+| `battery` | % | |
+| `voltage` | V | |
+
+- `/current`: a metric never received is missing - never `null` or zero; `{}` before the first
+  reading. `measuredAt` is the newest time the station is known to have had the value (a value that
+  does not change is confirmed by every read of the gateway), `stale` is true when that is older
+  than `weather.monitor.silent-after` (30 min), the threshold of the alerts.
+- `/status`: what is not known yet is left out (`gateway` without a station in the registry,
+  `reachable` / `checkedAt` before the first read of the gateway, `lastReadingAt` before anything
+  was heard). `silent` is true when nothing was heard for 30 min - or at all since the start, while
+  the alert waits for the threshold.
+- `/history`: the rules of the hot-water history of water-service. `from` and `to` are local
+  date-times without an offset (`2026-10-16T00:00:00`), `from` before `to`, the start included
+  and the end not, at most 31 days, years 2000-9999 - anything else is a 400 without a code. The
+  **buckets** are chosen by the service and named in `bucketSeconds`: **5 min** for up to 2 days,
+  **30 min** up to 8 days, **2 h** beyond, aligned to the clock of the house; a bucket without a
+  reading has no point. `avg` is rounded to 2 decimals. A `metric` outside the list is a 400 with
+  the code `UNKNOWN_METRIC`. One range is queried at a time, each cut off after 10 s. The night the
+  summer time begins has a gap of an hour, the night it ends puts the repeated hour into the same
+  buckets.
 
 # Database
 
@@ -113,8 +159,8 @@ service is not routed by `api-gateway-service` (HAS-239).
   a metric never received is NULL; a value that does not fit its column is stored as NULL (WARN).
   Columns: `temperature` (°C, 0.1), `humidity` (%), `dew_point` (°C, 0.01), `pressure` (hPa at
   the station, 0.01), `illuminance` (lx), `uv` (0.1), `wind` and `gust` (m/s, 0.01),
-  `wind_direction` (°), `raining`, `precipitation` (the running total of the station - its unit is
-  checked before HAS-238 shows it), `battery` (%), `voltage` (V, 0.01). No retention yet (HAS-238).
+  `wind_direction` (°), `raining`, `precipitation` (the running total of the station - unit not
+  confirmed yet), `battery` (%), `voltage` (V, 0.01). Kept for `weather.retention` (730 days).
 - `V2__station_alert.sql` - `station_alert`: the alerts of the watch that are open now, one row per
   watch (`STATION`, `GATEWAY`) with the id of the station in the registry, since when and when the
   household was last told (`timestamptz`); removed when it is over. An alert about a station the

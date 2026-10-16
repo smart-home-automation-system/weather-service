@@ -97,6 +97,26 @@ class WeatherStationTest {
         assertThat(sut.gatewayAnsweredAt()).contains(answered);
     }
 
+    //what the status of the read API shows: the last read, answered or not
+    @Test
+    void should_know_the_last_check_of_the_gateway() {
+        assertThat(sut.lastCheck()).isEmpty();
+        sut.refresh().block();
+        assertThat(sut.lastCheck()).hasValueSatisfying(check -> {
+            assertThat(check.answered()).isTrue();
+            assertThat(check.checkedAt()).isEqualTo(clock.instant());
+        });
+
+        clock.move(Duration.ofMinutes(5));
+        when(loader.load(any())).thenReturn(Mono.error(new IllegalStateException("gateway away")));
+        sut.refresh().block();
+
+        assertThat(sut.lastCheck()).hasValueSatisfying(check -> {
+            assertThat(check.answered()).isFalse();
+            assertThat(check.checkedAt()).isEqualTo(clock.instant());
+        });
+    }
+
     //an answer of the old gateway says nothing about the new one
     @Test
     void should_know_no_answer_of_a_gateway_that_replaced_the_last() {

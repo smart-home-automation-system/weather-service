@@ -40,6 +40,10 @@ public class WeatherStation {
     private record Sensors(Station station, StationSensors sensors, Instant readAt) {
     }
 
+    //the last read of the gateway of a station, answered or not - what the status of the read API shows
+    public record GatewayCheck(Station station, Instant checkedAt, boolean answered) {
+    }
+
     private final DeviceRegistryClient deviceRegistryClient;
     private final SensorMapLoader sensorMapLoader;
     private final CurrentWeather currentWeather;
@@ -53,6 +57,7 @@ public class WeatherStation {
     private final AtomicReference<Station> station = new AtomicReference<>();
     private final AtomicBoolean registryRead = new AtomicBoolean();
     private final AtomicReference<Sensors> sensors = new AtomicReference<>();
+    private final AtomicReference<GatewayCheck> lastCheck = new AtomicReference<>();
 
     public Mono<Void> refresh() {
         return Mono.defer(this::readRegistry)
@@ -76,6 +81,15 @@ public class WeatherStation {
     //since the station or the gateway changed
     public Optional<Instant> gatewayAnsweredAt() {
         return current().map(Sensors::readAt);
+    }
+
+    //the last read of the gateway of the station as it is now - empty before the first one, and after
+    //the station or the gateway changed
+    public Optional<GatewayCheck> lastCheck() {
+        final GatewayCheck check = lastCheck.get();
+        return check != null && station().filter(check.station()::equals).isPresent()
+            ? Optional.of(check)
+            : Optional.empty();
     }
 
     private Optional<Sensors> current() {
@@ -117,7 +131,9 @@ public class WeatherStation {
         return sensorMapLoader.load(known)
             .doOnNext(gateway -> {
                 final StationSensors loaded = gateway.sensors();
-                final Sensors previous = sensors.getAndSet(new Sensors(known, loaded, clock.instant()));
+                final Instant answeredAt = clock.instant();
+                lastCheck.set(new GatewayCheck(known, answeredAt, true));
+                final Sensors previous = sensors.getAndSet(new Sensors(known, loaded, answeredAt));
                 if (previous == null || !previous.station().equals(known) || !previous.sensors().equals(loaded)) {
                     log.info("Sensors of the weather station on the gateway {}: {}", known.gatewayDeviceId(), loaded);
                 }
@@ -130,8 +146,11 @@ public class WeatherStation {
                     }
                 }
             })
-            .doOnError(e -> log.warn("Read of the weather station from the gateway {} failed, the last map stays: {}",
-                known.gatewayDeviceId(), e.toString()))
+            .doOnError(e -> {
+                lastCheck.set(new GatewayCheck(known, clock.instant(), false));
+                log.warn("Read of the weather station from the gateway {} failed, the last map stays: {}",
+                    known.gatewayDeviceId(), e.toString());
+            })
             .onErrorComplete()
             .then();
     }

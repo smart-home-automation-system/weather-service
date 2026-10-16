@@ -3,7 +3,8 @@
 The weather station of the house (epic HAS-233): a Shelly WS90 read locally through a BTHome
 gateway, its readings kept and served to the dashboard, the blinds schedules (HAS-247) and the
 overview. Since HAS-236 it takes in the readings of the station and stores them, since HAS-237 it
-reconciles with the gateway every 5 min and alerts on silence; no endpoints yet (HAS-238).
+reconciles with the gateway every 5 min and alerts on silence, since HAS-238 it serves the read API
+(`/current`, `/status`, `/history`) and deletes readings past the retention.
 
 Part of the smart-home-automation-system organization — org-wide conventions, the
 repository map and working rules come from the workspace-level context
@@ -18,8 +19,10 @@ the service code) holds everywhere else.
   notifications to `/notification` (user `notification`, a second connection - the alerts of
   `StationWatch`, Discord channel `alerts` through `notification-service`);
   calls `database-service` (device registry) over k8s DNS (`internal.service.database`), and the
-  gateway of the station through `shelly-client` (`Shelly.GetComponents`, reads only). No endpoints
-  yet, not routed by `api-gateway-service` (HAS-239).
+  gateway of the station through `shelly-client` (`Shelly.GetComponents`, reads only). The read API
+  (HAS-238) is not routed by `api-gateway-service` yet (HAS-239 - GET-only, like the presence
+  allowlist). Its callers to come: the dashboard (`UNKNOWN_METRIC` needs a text there), the blinds
+  schedules (HAS-247), the overview.
 - Uses libraries: `cholewa-commons` 1.9.0 (pool, error contract, connection names,
   `NotificationPublisher`, the required properties), `smart-home-sdk` 1.9.0, `shelly-client`
   2.1.0 (the decoder, `dynamicComponents` - added to the library for this service in HAS-236).
@@ -127,5 +130,21 @@ the service code) holds everywhere else.
   Bash), the released image first (`SPRING_PROFILES_ACTIVE=home,local`, the `database-*` variables,
   `flyway-url=...?sslmode=require`, host `host.docker.internal`), then the new jar on the same
   database.
+- **The read API** (HAS-238): `WeatherController` -> `CurrentWeatherQuery` (memory) and
+  `WeatherHistoryService` (database). The names of the metrics are `Metric.apiName()` and the columns
+  `Metric.column()`, both pinned by `MetricTest` - wire contract of the dashboard and the blinds
+  schedules. `/current` shows each value with `CurrentWeather.confirmed`: the newest time the held
+  value was seen again (`seed` of the same value at a later time moves it, without a new row), so a
+  value that never changes is not `stale`. `/history` - `HistoryRange` is a **copy** of the one of
+  water-service (heating has the rules too; three copies, no move to `cholewa-commons`); the query is
+  built by `WeatherHistoryRepository` from `Metric` only (a column cannot be a parameter),
+  PostgreSQL SQL tested in Testcontainers; the wind direction is a circular mean without min/max, the
+  rain 1/0. `OneAtATime` queues the history queries (the pool has 2; a waiter that is cancelled
+  hands its turn on only after the one before it), each cut off after 10 s. `UNKNOWN_METRIC`
+  (`WeatherError`, pinned) lists the names there are and never echoes the request. The unit of
+  `precipitation` is **not confirmed** (raw 4311, the running total) - compare a day of rain with the
+  Shelly app.
+- **The retention** (`WeatherRetention`, 03:10 house time): rows older than `weather.retention`
+  (730d, `@DurationUnit(DAYS)`, 30d-3650d, `RetentionPropertiesTest`), never the latest row.
 - **Surefire activates the `test` profile for every class**; the `includes` match only
   `**/*Test.java` and `**/*IT.java`. Tests use `mockwebserver3`.
