@@ -102,4 +102,20 @@ class WeatherReadingRepositoryTest {
     void should_read_nothing_from_an_empty_table() {
         sut.findFirstByOrderByIdDesc().as(StepVerifier::create).verifyComplete();
     }
+
+    //the retention: older rows go, the latest one stays even when it is older too - the state is
+    //restored from it
+    @Test
+    void should_delete_the_rows_before_the_retention_but_never_the_latest() {
+        sut.save(WeatherReadingEntity.builder().measuredAt(AT.minusDays(800)).temperature(new BigDecimal("1.0")).build()).block();
+        sut.save(WeatherReadingEntity.builder().measuredAt(AT).temperature(new BigDecimal("2.0")).build()).block();
+        sut.save(WeatherReadingEntity.builder().measuredAt(AT.minusDays(790)).temperature(new BigDecimal("3.0")).build()).block();
+
+        sut.deleteOlderThan(AT.minusDays(730)).as(StepVerifier::create).expectNext(1L).verifyComplete();
+
+        sut.findAll().map(WeatherReadingEntity::temperature).collectList().as(StepVerifier::create)
+            .assertNext(left -> assertThat(left).usingElementComparator(BigDecimal::compareTo)
+                .containsExactlyInAnyOrder(new BigDecimal("2.0"), new BigDecimal("3.0")))
+            .verifyComplete();
+    }
 }

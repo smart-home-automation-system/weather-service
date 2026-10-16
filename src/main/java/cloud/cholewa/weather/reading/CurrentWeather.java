@@ -29,6 +29,10 @@ import java.util.concurrent.atomic.AtomicReference;
 //silence by it; the time is the station's, so a reading that arrives late is not a sign of life now.
 //A time ahead of the clock of the pod by more than a minute is not taken: the gateway with a clock gone
 //wrong once would otherwise hold heardAt in the future, and a dead station would never be reported.
+//Per metric, the newest time the held value was confirmed (confirmed): a status of the same value at a
+//later time is no new reading - no row for it - but it says the value still holds then. The read API
+//shows a value with that time and judges by it whether the value is stale (HAS-238): a value that never
+//changes, the battery or the rain for days, is as fresh as the last packet that carried it.
 //The listener runs on several threads (prefetch 3), hence one lock for the map - a reading of one
 //metric and a snapshot of all of them must not interleave
 @Slf4j
@@ -41,6 +45,7 @@ public class CurrentWeather {
     private final Clock clock;
 
     private final Map<Metric, Reading> readings = new EnumMap<>(Metric.class);
+    private final Map<Metric, Instant> confirmed = new EnumMap<>(Metric.class);
     private boolean changedSinceSnapshot;
     private final AtomicReference<StationLink> link = new AtomicReference<>();
     private final AtomicReference<Instant> heardAt = new AtomicReference<>();
@@ -58,8 +63,7 @@ public class CurrentWeather {
                     metric, reading.measuredAt(), held.measuredAt());
                 return false;
             }
-            readings.put(metric, reading);
-            changedSinceSnapshot = true;
+            take(metric, reading);
             return true;
         }
     }
@@ -76,10 +80,25 @@ public class CurrentWeather {
             final boolean take = held == null
                 || reading.measuredAt().isAfter(held.measuredAt()) && !sameValue(held, reading);
             if (take) {
-                readings.put(metric, reading);
-                changedSinceSnapshot = true;
+                take(metric, reading);
+            } else if (sameValue(held, reading)) {
+                confirm(metric, reading.measuredAt());
             }
             return take;
+        }
+    }
+
+    //under the lock of the map
+    private void take(final Metric metric, final Reading reading) {
+        readings.put(metric, reading);
+        confirmed.put(metric, reading.measuredAt());
+        changedSinceSnapshot = true;
+    }
+
+    //under the lock of the map; a time ahead of the pod is not taken, as for heardAt
+    private void confirm(final Metric metric, final Instant at) {
+        if (!at.isAfter(clock.instant().plus(CLOCK_TOLERANCE))) {
+            confirmed.merge(metric, at, (held, next) -> next.isAfter(held) ? next : held);
         }
     }
 
@@ -97,6 +116,7 @@ public class CurrentWeather {
                 final Reading held = readings.get(metric);
                 if (held == null || held.measuredAt().isBefore(reading.measuredAt())) {
                     readings.put(metric, reading);
+                    confirmed.put(metric, reading.measuredAt());
                 }
             });
         }
@@ -106,6 +126,7 @@ public class CurrentWeather {
     public void clear() {
         synchronized (readings) {
             readings.clear();
+            confirmed.clear();
             changedSinceSnapshot = false;
         }
         link.set(null);
@@ -133,6 +154,16 @@ public class CurrentWeather {
     public Map<Metric, Reading> readings() {
         synchronized (readings) {
             return Map.copyOf(readings);
+        }
+    }
+
+    //the state as the read API shows it: each value with the newest time it was confirmed
+    public Map<Metric, Reading> confirmedReadings() {
+        synchronized (readings) {
+            final Map<Metric, Reading> current = new EnumMap<>(Metric.class);
+            readings.forEach((metric, reading) -> current.put(metric,
+                new Reading(reading.number(), reading.flag(), confirmed.getOrDefault(metric, reading.measuredAt()))));
+            return current;
         }
     }
 

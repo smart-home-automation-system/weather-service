@@ -190,6 +190,49 @@ class CurrentWeatherTest {
         assertThat(sut.heardAt()).contains(AT);
     }
 
+    //the read API shows a value with the newest time it was confirmed: the same value later is no new
+    //reading, but it still holds then
+    @Test
+    void should_confirm_a_value_that_does_not_change() {
+        sut.observe(Metric.BATTERY, number("100", AT));
+        sut.takeSnapshot();
+
+        sut.seed(Metric.BATTERY, number("100", AT.plusSeconds(600)));
+
+        assertThat(sut.confirmedReadings()).containsEntry(Metric.BATTERY, number("100", AT.plusSeconds(600)));
+        assertThat(sut.readings()).containsEntry(Metric.BATTERY, number("100", AT));
+        assertThat(sut.takeSnapshot()).isEmpty();
+    }
+
+    //another value confirms nothing of the held one, and a refused one moves no time
+    @Test
+    void should_confirm_only_the_value_held() {
+        sut.observe(Metric.WIND, number("1.4", AT));
+
+        sut.seed(Metric.WIND, number("1.1", AT));
+        sut.seed(Metric.WIND, number("1.4", AT.minusSeconds(60)));
+
+        assertThat(sut.confirmedReadings()).containsEntry(Metric.WIND, number("1.4", AT));
+    }
+
+    @Test
+    void should_confirm_a_new_value_at_its_own_time() {
+        sut.seed(Metric.BATTERY, number("100", AT.plusSeconds(600)));
+
+        sut.observe(Metric.BATTERY, number("99", AT.plusSeconds(700)));
+
+        assertThat(sut.confirmedReadings()).containsEntry(Metric.BATTERY, number("99", AT.plusSeconds(700)));
+    }
+
+    @Test
+    void should_forget_the_confirmations_when_cleared() {
+        sut.observe(Metric.BATTERY, number("100", AT));
+
+        sut.clear();
+
+        assertThat(sut.confirmedReadings()).isEmpty();
+    }
+
     private static Reading number(final String value, final Instant at) {
         return Reading.number(new BigDecimal(value), at);
     }

@@ -111,6 +111,8 @@ weather:
   monitor:
     silent-after: 30m
     reminder-interval: 1h
+  # how long the rows of weather_reading are kept, deleted every night at 03:10; a bare number is days
+  retention: 730d
 
 # the services this one calls inside the cluster, over k8s DNS. A bare number of a timeout is
 # seconds

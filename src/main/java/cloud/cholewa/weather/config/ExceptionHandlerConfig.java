@@ -1,6 +1,8 @@
 package cloud.cholewa.weather.config;
 
 import cloud.cholewa.commons.error.GlobalErrorExceptionHandler;
+import cloud.cholewa.weather.error.WeatherException;
+import cloud.cholewa.weather.error.processor.WeatherExceptionProcessor;
 import org.springframework.boot.autoconfigure.web.WebProperties;
 import org.springframework.boot.webflux.error.ErrorAttributes;
 import org.springframework.context.ApplicationContext;
@@ -9,8 +11,9 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.codec.ServerCodecConfigurer;
 
-//the error contract of cholewa-commons; the processors of the service's own exceptions are added
-//here with the first endpoint that throws one
+import java.util.Map;
+
+//the error contract of cholewa-commons, with the processor of the requests the read API refuses
 @Configuration
 public class ExceptionHandlerConfig {
 
@@ -24,6 +27,6 @@ public class ExceptionHandlerConfig {
     ) {
         return new GlobalErrorExceptionHandler(
             errorAttributes, webProperties.getResources(), applicationContext, serverCodecConfigurer
-        );
+        ).withCustomErrorProcessor(Map.of(WeatherException.class, new WeatherExceptionProcessor()));
     }
 }

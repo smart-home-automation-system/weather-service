@@ -35,4 +35,24 @@ class MetricTest {
     void should_have_rain_as_the_only_flag() {
         assertThat(Metric.values()).filteredOn(Metric::isFlag).containsExactly(Metric.RAIN);
     }
+
+    //the names of the read API are wire contract: the dashboard and the blinds schedules ask by them
+    @Test
+    void should_keep_the_names_of_the_read_api() {
+        assertThat(Metric.values()).extracting(Metric::apiName).containsExactly(
+            "battery", "pressure", "illuminance", "dewPoint", "voltage", "raining", "humidity", "wind", "gust",
+            "temperature", "uv", "windDirection", "precipitation");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"dewPoint, DEW_POINT", "raining, RAIN", "windDirection, WIND_DIRECTION"})
+    void should_find_a_metric_by_its_api_name(final String name, final Metric metric) {
+        assertThat(Metric.ofApiName(name)).contains(metric);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"DEW_POINT", "dewpoint", "rain", "' temperature'", "''"})
+    void should_find_no_metric_by_another_name(final String name) {
+        assertThat(Metric.ofApiName(name)).isEmpty();
+    }
 }
