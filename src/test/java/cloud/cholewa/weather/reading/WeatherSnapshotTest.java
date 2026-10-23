@@ -11,6 +11,7 @@ import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -144,6 +145,26 @@ class WeatherSnapshotTest {
     @Test
     void should_stop_after_the_listener() {
         assertThat(sut.getPhase()).isLessThan(Integer.MAX_VALUE);
+    }
+
+    //HAS-304: an insert hung on a dead connection ends at its bound, and the readings it carried are stored by
+    //the next pass
+    @Test
+    void should_end_a_hung_pass_at_its_bound_and_keep_the_readings() {
+        when(repository.findFirstByOrderByIdDesc()).thenReturn(Mono.empty());
+        when(repository.save(any()))
+            .thenReturn(Mono.never())
+            .thenAnswer(call -> Mono.just(call.getArgument(0)));
+        currentWeather.observe(Metric.TEMPERATURE, Reading.number(new BigDecimal("4.4"), AT));
+
+        StepVerifier.withVirtualTime(sut::snapshot)
+            .expectSubscription()
+            .expectNoEvent(WeatherSnapshot.LIMIT.minusSeconds(1))
+            .thenAwait(Duration.ofSeconds(1))
+            .verifyComplete();
+        sut.snapshot().as(StepVerifier::create).verifyComplete();
+
+        verify(repository, times(2)).save(any());
     }
 
     private void nothingStored() {

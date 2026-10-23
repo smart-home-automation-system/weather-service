@@ -1,13 +1,10 @@
 package cloud.cholewa.weather.config;
 
-import cloud.cholewa.shelly.http.ShellyHttpClientCustomizer;
 import io.netty.channel.ChannelOption;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.zalando.logbook.Logbook;
-import org.zalando.logbook.netty.LogbookClientHandler;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.resources.ConnectionProvider;
 
@@ -15,7 +12,9 @@ import java.time.Duration;
 
 //The WebClient of the device registry, with its own timeouts and its own pool; a service called
 //later gets one the same way. Built from the injected builder - a prototype, so each gets a fresh
-//one - or the calls would be untraced
+//one - or the calls would be untraced. Logbook logs every call from the reactive chain, with its traceId:
+//cholewa-commons >= 1.10.0 puts its exchange filter on the injected builder, and the clients of shelly-client
+//are built from it too - so no Logbook handler of our own here (HAS-304), or every call is logged twice
 @Configuration
 public class WebClientConfig {
 
@@ -35,18 +34,9 @@ public class WebClientConfig {
     WebClient databaseWebClient(
         final WebClient.Builder webClientBuilder,
         final ConnectionProvider databaseConnectionProvider,
-        final Logbook logbook,
         final InternalServiceProperties properties
     ) {
-        return webClient(webClientBuilder, databaseConnectionProvider, logbook, properties.database());
-    }
-
-    //the gateway of the station is called through shelly-client (BTHomeSensor.GetConfig, HAS-236),
-    //whose clients put their own connector on the builder, so the Logbook handler of the client
-    //above does not reach them; this does
-    @Bean
-    ShellyHttpClientCustomizer shellyCallsInTheLog(final Logbook logbook) {
-        return http -> http.doOnConnected(connection -> connection.addHandlerLast(new LogbookClientHandler(logbook)));
+        return webClient(webClientBuilder, databaseConnectionProvider, properties.database());
     }
 
     static ConnectionProvider connectionProvider(final String name) {
@@ -59,13 +49,11 @@ public class WebClientConfig {
     static WebClient webClient(
         final WebClient.Builder webClientBuilder,
         final ConnectionProvider connectionProvider,
-        final Logbook logbook,
         final InternalServiceProperties.Endpoint endpoint
     ) {
         final HttpClient httpClient = HttpClient.create(connectionProvider)
             .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(endpoint.connectTimeout().toMillis()))
-            .responseTimeout(endpoint.responseTimeout())
-            .doOnConnected(connection -> connection.addHandlerLast(new LogbookClientHandler(logbook)));
+            .responseTimeout(endpoint.responseTimeout());
 
         return webClientBuilder
             .baseUrl(endpoint.url())

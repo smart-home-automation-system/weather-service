@@ -23,8 +23,9 @@ the service code) holds everywhere else.
   (HAS-238) is not routed by `api-gateway-service` yet (HAS-239 - GET-only, like the presence
   allowlist). Its callers to come: the dashboard (`UNKNOWN_METRIC` needs a text there), the blinds
   schedules (HAS-247), the overview.
-- Uses libraries: `cholewa-commons` 1.9.0 (pool, error contract, connection names,
-  `NotificationPublisher`, the required properties), `smart-home-sdk` 1.9.0, `shelly-client`
+- Uses libraries: `cholewa-commons` 1.11.0 (pool, error contract, connection names,
+  `NotificationPublisher`, the required properties, Logbook in the reactive chain, the scheduler pool and
+  `ScheduledPass`), `smart-home-sdk` 1.12.0, `shelly-client`
   2.1.0 (the decoder, `dynamicComponents` - added to the library for this service in HAS-236).
 - Database: own database `home-automation-weather`, pool `database.pool.max-size: 2` (heating 2 /
   database 4 / water 2 / presence 2 / blinds 2 / weather 2 = 14 of 22), pinned by
@@ -112,16 +113,30 @@ the service code) holds everywhere else.
   `notification-rabbitmq-password`, before the first bean. `BrokerPasswordsTest` ties the list
   to the placeholders of `application.yaml`. No copy of `BrokerPasswordCheck` here — it moved
   into the library with HAS-235.
-- **The notification connection is not a bean** (`NotificationRabbitConfig`, the third copy -
-  heating- and blinds-service have the others; up to three stay, a fourth moves it to
-  `cholewa-commons`): a `ConnectionFactory` or `RabbitOperations` bean would make
+- **The notification connection is not a bean** (`NotificationRabbitConfig`, one of five copies -
+  heating, blinds, light and amx have the others; kept copied by the owner's choice, HAS-257 / HAS-309,
+  a change goes into every copy): a `ConnectionFactory` or `RabbitOperations` bean would make
   `RabbitAutoConfiguration` back off, and the listener would lose manual ack, prefetch and
   observation. `ClockConfig` is the second copy (blinds-service).
 - **Timeouts of the client**: `internal.service.database.{connect,response}-timeout`, a bare
   number is seconds, bounded 1–60 s (`InternalServicePropertiesTest`). Its own named
   `ConnectionProvider` with 2 min idle / 30 min life (the gateway's HAS-212 limits).
-- **Shelly calls through `shelly-client` reach Logbook only via the `ShellyHttpClientCustomizer`
-  bean** (`shellyCallsInTheLog`): the library's clients put their own connector on the builder.
+- **Logbook logs every call from the reactive chain, with its `traceId`** (`cholewa-commons` >= 1.10.0,
+  since HAS-304): the injected `WebClient.Builder` carries Logbook's exchange filter and the clients of
+  `shelly-client` are built from it, so the service adds **no Logbook handler of its own** - the
+  `LogbookClientHandler` of `WebClientConfig` and the `shellyCallsInTheLog` customizer are gone, or every
+  call would be logged twice; `WeatherServiceApplicationTest` pins that no `ShellyHttpClientCustomizer` is back.
+- **Every scheduled task is bounded and they run on a pool** (HAS-304, after blinds-service froze on
+  2026-10-22: Spring blocks the scheduler thread until a reactive fixed-delay pass completes, and the one
+  thread of Boot stopped every task with the health UP). The pool of ten comes from `cholewa-commons` 1.11.0
+  (pinned by `WeatherServiceApplicationTest`); each `@Scheduled` method returns
+  `ScheduledPass.bounded(task, LIMIT, ...)`, pinned by a test that hangs the pass: `WeatherSnapshot` 50 s
+  (`fixedRate` - Spring does not wait for it, so a hung pass would only add up; a snapshot cut on its way
+  keeps its readings, `doOnCancel` -> `snapshotFailed`), `StationRefresh` 4 min (the registry, the gateway
+  and the watch with its 30 s notifications), `WeatherRetention` 15 min. **What runs at the same time now**
+  was checked: `CurrentWeather` is `synchronized` / atomic, as the listener already wrote it beside the
+  passes; the database passes (the snapshot, the alerts of the watch, the nightly DELETE) take one
+  connection per statement and fit the pool of 2 - a third waits `max-acquire-time`, as before.
 - **The test document points everything outward at port 1** (broker, database, the registry),
   so a context test reaches nothing even where the names resolve.
 - **A migration is rehearsed on a throwaway PostgreSQL, never by a local run** — `home,local`
