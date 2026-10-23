@@ -1,5 +1,6 @@
 package cloud.cholewa.weather.reading;
 
+import cloud.cholewa.commons.scheduling.ScheduledPass;
 import cloud.cholewa.weather.database.repository.WeatherReadingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +32,10 @@ public class WeatherSnapshot implements SmartLifecycle {
 
     //the shutdown of the pod waits for the last store at most this long (the grace period is 30 s)
     static final Duration LAST_STORE = Duration.ofSeconds(10);
+    //Bounded (HAS-304): one read and one insert a minute - a pass beyond 50 s is hung on a dead connection, and
+    //ends there; a snapshot cut on its way keeps its readings for the next pass. Below the rate: fixedRate does
+    //not wait for the last pass, so an unbounded hung one would only add up
+    static final Duration LIMIT = Duration.ofSeconds(50);
 
     private final CurrentWeather currentWeather;
     private final WeatherReadingRepository weatherReadingRepository;
@@ -41,7 +46,8 @@ public class WeatherSnapshot implements SmartLifecycle {
 
     @Scheduled(initialDelayString = "PT1M", fixedRateString = "PT1M")
     Mono<Void> snapshot() {
-        return Mono.defer(this::restoreOnce).then(Mono.defer(this::storeWhenRestored));
+        return ScheduledPass.bounded("weather snapshot", LIMIT,
+            () -> Mono.defer(this::restoreOnce).then(Mono.defer(this::storeWhenRestored)));
     }
 
     private Mono<Void> restoreOnce() {
@@ -69,6 +75,8 @@ public class WeatherSnapshot implements SmartLifecycle {
             .flatMap(snapshot -> Mono.fromCallable(() -> ReadingMapper.toEntity(snapshot, clock.getZone()))
                 .flatMap(weatherReadingRepository::save)
                 .doOnNext(saved -> log.info("Weather reading stored: {}", saved))
+                //cut by the bound of the pass: the row may or may not be stored - the next pass stores the state again
+                .doOnCancel(currentWeather::snapshotFailed)
                 .doOnError(e -> {
                     currentWeather.snapshotFailed();
                     log.warn("Weather reading measured at {} could not be stored, tried again in a minute: {}",

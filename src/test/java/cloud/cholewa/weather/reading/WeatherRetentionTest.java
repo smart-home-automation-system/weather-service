@@ -61,4 +61,16 @@ class WeatherRetentionTest {
 
         sut.purge().as(StepVerifier::create).verifyComplete();
     }
+
+    //HAS-304: a DELETE hung on a dead connection ends at its bound, not the scheduler for good
+    @Test
+    void should_end_a_pass_that_never_completes_at_its_bound() {
+        when(repository.deleteOlderThan(any())).thenReturn(Mono.never());
+
+        StepVerifier.withVirtualTime(sut::purge)
+            .expectSubscription()
+            .expectNoEvent(WeatherRetention.LIMIT.minusSeconds(1))
+            .thenAwait(Duration.ofSeconds(1))
+            .verifyComplete();
+    }
 }
