@@ -1,5 +1,6 @@
 package cloud.cholewa.weather;
 
+import cloud.cholewa.weather.config.AirProperties;
 import cloud.cholewa.weather.config.InternalServiceProperties;
 import cloud.cholewa.weather.config.MonitorProperties;
 import cloud.cholewa.weather.config.NotificationConnectionProperties;
@@ -13,7 +14,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
     NotificationConnectionProperties.class,
     InternalServiceProperties.class,
     MonitorProperties.class,
-    RetentionProperties.class
+    RetentionProperties.class,
+    AirProperties.class
 })
 public class WeatherServiceApplication {
 

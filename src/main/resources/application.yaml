@@ -111,6 +111,14 @@ weather:
   monitor:
     silent-after: 30m
     reminder-interval: 1h
+  # the air quality sensor (HAS-429): no valid reading for silent-after is an alert on the technical channel;
+  # a level of the air at smog-level or above held for smog-after opens an episode of smog (a household message),
+  # at clear-level or below held as long closes it. A bare number of a duration is minutes
+  air:
+    silent-after: 30m
+    smog-level: 5
+    clear-level: 3
+    smog-after: 30m
   # how long the rows of weather_reading are kept, deleted every night at 03:10; a bare number is days
   retention: 730d
 

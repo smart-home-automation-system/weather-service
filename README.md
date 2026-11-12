@@ -80,6 +80,17 @@ Everything is non-blocking (Spring WebFlux / Reactor):
   before anything is stored, and when the pod stops the state is stored once more. **Every night at
   03:10** the rows older than `weather.retention` (default 730 days; a bare number is days, 30 days
   to 10 years) are deleted - never the latest one, which the state is restored from.
+- **The watch over the air quality sensor and the smog** (HAS-429), after every read of the sensor (every
+  minute): no valid reading for `weather.air.silent-after` (30 min; 10 min - 24 h, a bare number is minutes) is
+  an alert on the technical channel, reminded every `weather.monitor.reminder-interval`, one info when a valid
+  reading is back (the row of `station_alert` with the watch `AIR_SENSOR`). **Smog** is a level of the air at
+  `weather.air.smog-level` (5 - bad; 2 - 6) or above held for `weather.air.smog-after` (30 min; 5 min - 6 h): it
+  opens an episode with one household message (`smog warning`, the particles of the reading); a level at
+  `weather.air.clear-level` (3 - moderate; below the smog level) or below held as long closes it (`smog over`).
+  The hold is judged by the times the sensor measured; no reminders, no SMS (owner). The messages are the JSON
+  `HouseholdNotification` of smart-home-sdk 1.21.0 through the `household` category, worded by
+  notification-service (which must read the two events first - HAS-430). The episodes are rows of
+  `air_quality_alert` (V4), so a restart goes on with the open one.
 - **The watch over the station** (HAS-237), after every refresh: no reading from the station for
   `weather.monitor.silent-after` (default 30 min, 10 min - 24 h) is an **alert** (level `error`),
   repeated as a **reminder** (`warn`) every `weather.monitor.reminder-interval` (default 1 h,
@@ -124,7 +135,7 @@ date-time is house time without an offset.
 | Method | Path | What |
 |---|---|---|
 | GET | `/current` | per metric `{value, measuredAt, stale}` |
-| GET | `/status` | `gateway {deviceId, reachable, checkedAt}`, `lastReadingAt`, `silent`, `airSensor {address, reachable, checkedAt, lastReadingAt}` (HAS-427) |
+| GET | `/status` | `gateway {deviceId, reachable, checkedAt}`, `lastReadingAt`, `silent`, `airSensor {address, reachable, checkedAt, lastReadingAt, silent, smog {since, level}}` (HAS-427, HAS-429) |
 | GET | `/history?metric=&from=&to=` | one metric over a range: `metric`, `from`, `to`, `bucketSeconds`, `points: [{at, avg, min, max}]` |
 
 **Metrics** (the names of `/current` and of `metric`; the unit is the one the gateway reports):
@@ -183,7 +194,10 @@ date-time is house time without an offset.
   `air_quality_level` (1 - 6), whole numbers, nullable - a row written before V3, or while the sensor was
   never read, has none. A new reading of the sensor alone writes a row of the whole state; the retention
   deletes them with their rows.
+- `V4__air_quality_alert.sql` (HAS-429) - `air_quality_alert`: the episodes of smog - the sensor (its registry
+  id), `since`, `ended_at` (empty while open), the highest `level` and `peak_pm10` / `peak_pm25`; one open at a
+  time (a partial unique index), the ended ones kept as history (`timestamptz`).
 - `V2__station_alert.sql` - `station_alert`: the alerts of the watch that are open now, one row per
-  watch (`STATION`, `GATEWAY`) with the id of the station in the registry, since when and when the
+  watch (`STATION`, `GATEWAY`, `AIR_SENSOR` since HAS-429 - the id of the air quality sensor then) with the id of the station in the registry, since when and when the
   household was last told (`timestamptz`); removed when it is over. An alert about a station the
   registry no longer has is closed without a word.

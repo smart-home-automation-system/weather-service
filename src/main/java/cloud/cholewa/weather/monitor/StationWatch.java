@@ -77,6 +77,8 @@ public class StationWatch {
                 final Instant now = clock.instant();
                 final Instant watchedSince = watchedSince(station, now);
                 return stationAlertRepository.findAll()
+                    //the alert of the air quality sensor is AirSensorWatch's (HAS-429), of another device
+                    .filter(alert -> alert.watch() != Watch.AIR_SENSOR)
                     .filterWhen(alert -> ofThisStation(alert, station))
                     .collectMap(StationAlertEntity::watch)
                     .flatMap(alerts -> Flux.concat(
@@ -157,6 +159,7 @@ public class StationWatch {
                 .formatted(station.stationName(), from, span(since, now));
             case GATEWAY -> "The gateway %s of the weather station has not answered %s (%s)."
                 .formatted(station.gatewayDeviceId(), from, span(since, now));
+            case AIR_SENSOR -> throw notOfTheStation(watch);
         };
     }
 
@@ -166,6 +169,7 @@ public class StationWatch {
                 .formatted(station.stationName(), time(since), span(since, now));
             case GATEWAY -> "The gateway %s of the weather station has still not answered - since %s (%s)."
                 .formatted(station.gatewayDeviceId(), time(since), span(since, now));
+            case AIR_SENSOR -> throw notOfTheStation(watch);
         };
     }
 
@@ -175,7 +179,13 @@ public class StationWatch {
                 .formatted(station.stationName(), time(since), time(until), span(since, until));
             case GATEWAY -> "The gateway %s of the weather station answers again. It did not from %s to %s (%s)."
                 .formatted(station.gatewayDeviceId(), time(since), time(until), span(since, until));
+            case AIR_SENSOR -> throw notOfTheStation(watch);
         };
+    }
+
+    //the station judges its own two watches only
+    private static IllegalStateException notOfTheStation(final Watch watch) {
+        return new IllegalStateException("The watch " + watch + " is not of the weather station");
     }
 
     private String time(final Instant instant) {

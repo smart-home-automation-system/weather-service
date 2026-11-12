@@ -195,6 +195,19 @@ class StationWatchTest {
         assertThat(rows).isEmpty();
     }
 
+    //HAS-429: the alert of the air quality sensor lives in the same table and is AirSensorWatch's - the station
+    //neither closes it as "of another station" nor judges it
+    @Test
+    void should_leave_the_alert_of_the_air_sensor_alone() {
+        rows.put(1L, new StationAlertEntity(1L, 145L, Watch.AIR_SENSOR, START.minus(Duration.ofHours(3)), START.minus(Duration.ofHours(2))));
+        currentWeather.heard(START);
+
+        sut.check().as(StepVerifier::create).verifyComplete();
+
+        verifyNoInteractions(publisher);
+        assertThat(rows).containsOnlyKeys(1L);
+    }
+
     //a restart in the middle of an outage: the row says it was told already
     @Test
     void should_go_on_with_the_reminders_after_a_restart() {

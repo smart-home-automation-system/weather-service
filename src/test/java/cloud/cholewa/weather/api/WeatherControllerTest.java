@@ -87,7 +87,8 @@ class WeatherControllerTest {
     void should_answer_the_status_of_the_station() {
         when(currentWeatherQuery.status()).thenReturn(new StationStatus(
             new StationStatus.Gateway("shellyplugsg3-28372f2f0460", true, AT), AT.minusSeconds(20), false,
-            new StationStatus.AirSensor("10.78.30.23", true, AT, AT.minusMinutes(6))));
+            new StationStatus.AirSensor("10.78.30.23", true, AT, AT.minusMinutes(6), false,
+                new StationStatus.Smog(AT.minusMinutes(40), 5))));
 
         webTestClient.get().uri("/status")
             .exchange()
@@ -99,7 +100,8 @@ class WeatherControllerTest {
                       "lastReadingAt": "2026-10-16T12:43:15",
                       "silent": false,
                       "airSensor": {"address": "10.78.30.23", "reachable": true, "checkedAt": "2026-10-16T12:43:35",
-                        "lastReadingAt": "2026-10-16T12:37:35"}
+                        "lastReadingAt": "2026-10-16T12:37:35", "silent": false,
+                        "smog": {"since": "2026-10-16T12:03:35", "level": 5}}
                     }
                     """, JsonCompareMode.STRICT
             );
@@ -110,14 +112,14 @@ class WeatherControllerTest {
     void should_leave_out_what_is_not_known_in_the_status() {
         when(currentWeatherQuery.status()).thenReturn(new StationStatus(
             new StationStatus.Gateway("shellyplugsg3-28372f2f0460", null, null), null, true,
-            new StationStatus.AirSensor("10.78.30.23", null, null, null)));
+            new StationStatus.AirSensor("10.78.30.23", null, null, null, true, null)));
 
         webTestClient.get().uri("/status")
             .exchange()
             .expectStatus().isOk()
             .expectBody().json(
                 """
-                    {"gateway": {"deviceId": "shellyplugsg3-28372f2f0460"}, "silent": true, "airSensor": {"address": "10.78.30.23"}}
+                    {"gateway": {"deviceId": "shellyplugsg3-28372f2f0460"}, "silent": true, "airSensor": {"address": "10.78.30.23", "silent": true}}
                     """, JsonCompareMode.STRICT
             );
     }

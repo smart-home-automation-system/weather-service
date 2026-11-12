@@ -31,8 +31,8 @@ the service code) holds everywhere else.
 - Database: own database `home-automation-weather`, pool `database.pool.max-size: 2` (heating 2 /
   database 4 / water 2 / presence 2 / blinds 2 / weather 2 = 14 of 22), pinned by
   `WeatherServiceApplicationTest`. `V1__weather_reading.sql`, `V2__station_alert.sql`, `V3__air_quality.sql`
-  (HAS-428: `pm1`, `pm25`, `pm10`, `air_quality_level` on `weather_reading`, SMALLINT, nullable); the next
-  migration is V4.
+  (HAS-428: `pm1`, `pm25`, `pm10`, `air_quality_level` on `weather_reading`, SMALLINT, nullable),
+  `V4__air_quality_alert.sql` (HAS-429: the episodes of smog, one open at a time); the next migration is V5.
 - Integrates with hardware: the WS90 (`08:b9:5f:d1:e6:71`, registry id 55) through the Plug S Gen3
   TREADMILL (registry id 54), paired in HAS-234 - the notes, the sensor ids and how to re-pair are in
   `deployment-tools/scripts/shelly/devices.md`. Every device runs with `enable_rpc: false`, so only
@@ -115,9 +115,10 @@ the service code) holds everywhere else.
   `notification-rabbitmq-password`, before the first bean. `BrokerPasswordsTest` ties the list
   to the placeholders of `application.yaml`. No copy of `BrokerPasswordCheck` here — it moved
   into the library with HAS-235.
-- **The notification connection is not a bean** (`NotificationRabbitConfig`, one of five copies -
-  heating, blinds, light and amx have the others; kept copied by the owner's choice, HAS-257 / HAS-309,
-  a change goes into every copy): a `ConnectionFactory` or `RabbitOperations` bean would make
+- **The notification connection is not a bean** (`NotificationRabbitConfig`, one of the copies of the
+  organization - heating, blinds, light, amx, energy, water have the others; kept copied by the owner's choice, HAS-257 / HAS-309,
+  a change goes into every copy; since HAS-429 it carries the `household` category of the smog too - no eighth copy, this
+  service had one): a `ConnectionFactory` or `RabbitOperations` bean would make
   `RabbitAutoConfiguration` back off, and the listener would lose manual ack, prefetch and
   observation. `ClockConfig` is the second copy (blinds-service).
 - **Timeouts of the client**: `internal.service.database.{connect,response}-timeout`, a bare
@@ -170,8 +171,28 @@ the service code) holds everywhere else.
   quality into `AirQuality.restore` - kept through the first read of the registry (only another sensor
   clears). Rehearsed 2026-11-12 on a throwaway PostgreSQL: 0.5.0 -> the new build (V3 over its row) -> 0.5.0
   again on V3, restoring a row with the air quality - a rollback reads the rows. `/history` answers the four.
-  `/status` gains `airSensor {address, reachable, checkedAt, lastReadingAt}`; the watch of the sensor is
-  HAS-429.
+  `/status` gains `airSensor {address, reachable, checkedAt, lastReadingAt}`.
+- **The watch over the air quality sensor and the smog** (HAS-429), both after every read of the sensor in
+  `AirQualityPoll` (`poll().then(AirSensorWatch.check()).then(SmogWatch.check())`, still bounded at 50 s: the
+  notifications of both are cut off at 20 s). `AirProperties` (`weather.air.*`): `silentAfter` (MINUTES, 10m-24h,
+  default 30m), `smogLevel` (2-6, 5), `clearLevel` (1-5, 3, below the smog level - `@AssertTrue`), `smogAfter`
+  (MINUTES, 5m-6h, 30m), pinned by `AirPropertiesTest`.
+  - `AirSensorWatch`: the rules of `StationWatch` - an alert / reminder / info on the technical channel by
+    `AirQuality.lastReadingAt` (what was taken or confirmed - an error, no measurement or no answer adds nothing),
+    counted from the start while never measured; the open alert a row of `station_alert` with `Watch.AIR_SENSOR`
+    and the sensor id as `station_id` (the UNIQUE on `watch` holds: one sensor). **`StationWatch` skips that row**
+    - it would otherwise close it as "an alert of another station". `silent()` is the field of `/status`.
+  - `SmogWatch`: a hysteresis on the level (>= smog-level opens, <= clear-level closes, between holds), each held
+    `smogAfter` **by the times the sensor measured**, never by the clock - a sensor silent on a bad level opens
+    nothing. One `smog warning` at the start (occurredAt = the start of the bad hold, the particles of the reading
+    that met it), one `smog over` at the end, no reminders, **no SMS** (owner, 2026-11-12) -
+    `NotificationPublisher.publishHousehold(json)` of a `HouseholdNotification` (SDK 1.21.0, the injected Jackson 3
+    `JsonMapper`). Notification first, row after (`air_quality_alert`, V4; the peaks raised while open, written only
+    when they rise); a restart goes on with the open episode, never a second message; an open episode of another
+    sensor is closed without a word. The holds are in memory - a restart starts them anew. `openEpisode()` is the
+    `smog {since, level}` of `/status`.
+  - **Deploy order**: notification-service reads `smog warning` / `smog over` only from HAS-430 (SDK 1.21.0) - it must
+    run first, or a smog message of this service fails its read there.
 - **The read API** (HAS-238): `WeatherController` -> `CurrentWeatherQuery` (memory) and
   `WeatherHistoryService` (database). The names of the metrics are `Metric.apiName()` and the columns
   `Metric.column()`, both pinned by `MetricTest` - wire contract of the dashboard and the blinds

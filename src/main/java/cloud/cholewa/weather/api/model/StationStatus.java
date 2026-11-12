@@ -32,9 +32,20 @@ public record StationStatus(Gateway gateway, LocalDateTime lastReadingAt, boolea
      * {@code address} - where the sensor is read.<br>
      * {@code reachable} - whether the last read answered with its state; absent before the first read.<br>
      * {@code checkedAt} - when that read was made (house time); absent before it.<br>
-     * {@code lastReadingAt} - the newest time the sensor measured (house time); absent until it has.
+     * {@code lastReadingAt} - the newest time the sensor measured (house time); absent until it has.<br>
+     * {@code silent} - nothing valid measured for {@code weather.air.silent-after} (HAS-429), the threshold of its alert;
+     * true as well when nothing was measured since the start.<br>
+     * {@code smog} - the episode of smog going on; absent while the air is fine.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record AirSensor(String address, Boolean reachable, LocalDateTime checkedAt, LocalDateTime lastReadingAt) {
+    public record AirSensor(String address, Boolean reachable, LocalDateTime checkedAt, LocalDateTime lastReadingAt,
+                            boolean silent, Smog smog) {
+    }
+
+    /**
+     * {@code since} - when the level reached the smog level (house time).<br>
+     * {@code level} - the highest level of the episode so far.
+     */
+    public record Smog(LocalDateTime since, int level) {
     }
 }
