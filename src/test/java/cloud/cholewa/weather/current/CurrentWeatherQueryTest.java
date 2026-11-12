@@ -1,9 +1,12 @@
 package cloud.cholewa.weather.current;
 
 import cloud.cholewa.weather.air.AirQuality;
+import cloud.cholewa.weather.air.AirSensorWatch;
+import cloud.cholewa.weather.air.SmogWatch;
 import cloud.cholewa.weather.api.model.CurrentMetric;
 import cloud.cholewa.weather.api.model.StationStatus;
 import cloud.cholewa.weather.config.MonitorProperties;
+import cloud.cholewa.weather.database.model.AirQualityAlertEntity;
 import cloud.cholewa.weather.model.AirSensor;
 import cloud.cholewa.weather.model.Metric;
 import cloud.cholewa.weather.model.Reading;
@@ -39,7 +42,9 @@ class CurrentWeatherQueryTest {
 
     private final WeatherStation weatherStation = mock(WeatherStation.class);
     private final AirQuality airQuality = mock(AirQuality.class);
-    private final CurrentWeatherQuery sut = new CurrentWeatherQuery(currentWeather, weatherStation, airQuality,
+    private final AirSensorWatch airSensorWatch = mock(AirSensorWatch.class);
+    private final SmogWatch smogWatch = mock(SmogWatch.class);
+    private final CurrentWeatherQuery sut = new CurrentWeatherQuery(currentWeather, weatherStation, airQuality, airSensorWatch, smogWatch,
         new MonitorProperties(Duration.ofMinutes(30), Duration.ofHours(1)), CLOCK);
 
     @BeforeEach
@@ -48,6 +53,21 @@ class CurrentWeatherQueryTest {
         when(weatherStation.lastCheck()).thenReturn(Optional.empty());
         when(airQuality.confirmedReadings()).thenReturn(Map.of());
         when(airQuality.sensor()).thenReturn(Optional.empty());
+        when(smogWatch.openEpisode()).thenReturn(Optional.empty());
+    }
+
+    //HAS-429: the silence of the sensor and the episode of smog going on, for the card of the dashboard
+    @Test
+    void should_answer_a_silent_sensor_and_the_smog_going_on() {
+        when(airQuality.sensor()).thenReturn(Optional.of(SENSOR));
+        when(airQuality.lastCheck()).thenReturn(Optional.empty());
+        when(airQuality.lastReadingAt()).thenReturn(Optional.empty());
+        when(airSensorWatch.silent()).thenReturn(true);
+        when(smogWatch.openEpisode()).thenReturn(Optional.of(AirQualityAlertEntity.builder().id(1L).sensorId(145)
+            .since(NOW.minus(Duration.ofMinutes(40))).level(6).peakPm10(140).build()));
+
+        assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", null, null, null, true,
+            new StationStatus.Smog(LocalDateTime.of(2026, 10, 16, 13, 20, 0), 6)));
     }
 
     //HAS-427: the air quality stands beside the station, in the order of Metric, with the rules of every metric
@@ -71,7 +91,7 @@ class CurrentWeatherQueryTest {
         when(airQuality.lastReadingAt()).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(6))));
 
         assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", true,
-            LocalDateTime.of(2026, 10, 16, 13, 59, 30), LocalDateTime.of(2026, 10, 16, 13, 54, 0)));
+            LocalDateTime.of(2026, 10, 16, 13, 59, 30), LocalDateTime.of(2026, 10, 16, 13, 54, 0), false, null));
     }
 
     //before the first read of the sensor only its address is known
@@ -81,7 +101,9 @@ class CurrentWeatherQueryTest {
         when(airQuality.lastCheck()).thenReturn(Optional.empty());
         when(airQuality.lastReadingAt()).thenReturn(Optional.empty());
 
-        assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", null, null, null));
+        when(airSensorWatch.silent()).thenReturn(true);
+
+        assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", null, null, null, true, null));
     }
 
     @Test

@@ -1,6 +1,8 @@
 package cloud.cholewa.weather.current;
 
 import cloud.cholewa.weather.air.AirQuality;
+import cloud.cholewa.weather.air.AirSensorWatch;
+import cloud.cholewa.weather.air.SmogWatch;
 import cloud.cholewa.weather.api.model.CurrentMetric;
 import cloud.cholewa.weather.api.model.StationStatus;
 import cloud.cholewa.weather.config.MonitorProperties;
@@ -30,6 +32,8 @@ public class CurrentWeatherQuery {
     private final CurrentWeather currentWeather;
     private final WeatherStation weatherStation;
     private final AirQuality airQuality;
+    private final AirSensorWatch airSensorWatch;
+    private final SmogWatch smogWatch;
     private final MonitorProperties monitorProperties;
     private final Clock clock;
 
@@ -63,9 +67,14 @@ public class CurrentWeatherQuery {
             .map(sensor -> {
                 final AirQuality.Check check = airQuality.lastCheck().orElse(null);
                 final LocalDateTime lastReadingAt = airQuality.lastReadingAt().map(this::houseTime).orElse(null);
+                final boolean silent = airSensorWatch.silent();
+                final StationStatus.Smog smog = smogWatch.openEpisode()
+                    .map(episode -> new StationStatus.Smog(houseTime(episode.since()), episode.level()))
+                    .orElse(null);
                 return check == null
-                    ? new StationStatus.AirSensor(sensor.address(), null, null, lastReadingAt)
-                    : new StationStatus.AirSensor(sensor.address(), check.answered(), houseTime(check.checkedAt()), lastReadingAt);
+                    ? new StationStatus.AirSensor(sensor.address(), null, null, lastReadingAt, silent, smog)
+                    : new StationStatus.AirSensor(sensor.address(), check.answered(), houseTime(check.checkedAt()), lastReadingAt,
+                        silent, smog);
             })
             .orElse(null);
     }
