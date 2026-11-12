@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -30,10 +31,10 @@ class AirReadingsTest {
         assertThat(AirReadings.of(answer(1,
             sensor("pm1", 7, 0, 374L), sensor("pm2.5", 12, 0, 374L), sensor("pm10", 12, 0, 374L)), NOW))
             .containsExactly(
-                java.util.Map.entry(Metric.PM1, Reading.number(new BigDecimal("7"), measured)),
-                java.util.Map.entry(Metric.PM25, Reading.number(new BigDecimal("12"), measured)),
-                java.util.Map.entry(Metric.PM10, Reading.number(new BigDecimal("12"), measured)),
-                java.util.Map.entry(Metric.AIR_QUALITY_LEVEL, Reading.number(new BigDecimal("1"), measured)));
+                Map.entry(Metric.PM1, Reading.number(new BigDecimal("7"), measured)),
+                Map.entry(Metric.PM25, Reading.number(new BigDecimal("12"), measured)),
+                Map.entry(Metric.PM10, Reading.number(new BigDecimal("12"), measured)),
+                Map.entry(Metric.AIR_QUALITY_LEVEL, Reading.number(new BigDecimal("1"), measured)));
     }
 
     //a sensor in error, without a measurement or without a value is no reading - never a zero
