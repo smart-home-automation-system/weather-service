@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -169,6 +170,17 @@ class AirQualityTest {
         assertThat(sut.confirmedReadings()).isEmpty();
         assertThat(sut.lastCheck()).isEmpty();
         assertThat(sut.sensor()).get().extracting(AirSensor::id).isEqualTo(146L);
+    }
+
+    //HAS-428: the readings of the latest row, restored before the first answer of the registry, stay with it
+    @Test
+    void should_keep_the_restored_readings_through_the_first_read_of_the_registry() {
+        sut.restore(Map.of(Metric.PM25, Reading.number(new BigDecimal("30"), START.minusSeconds(120))));
+
+        registryHas(device(145, "10.78.30.23"));
+
+        assertThat(sut.readings()).containsOnlyKeys(Metric.PM25);
+        assertThat(sut.takeChange()).isFalse();
     }
 
     //a failed read of the registry keeps the last sensor

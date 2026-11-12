@@ -12,8 +12,7 @@ import java.util.Optional;
 //wire contract of the dashboard and the blinds schedules, pinned by MetricTest; the column is the one
 //of weather_reading (V1) the history reads.
 //The air quality (HAS-427) is no BTHome object: the BleBox airSensor outside the house is polled over HTTP
-//(Source.HTTP), so of(objectId, index) never finds those four. Their columns arrive with the storage task
-//(HAS-428); until then they are not stored, and the history does not know them (stored)
+//(Source.HTTP), so of(objectId, index) never finds those four; their columns came with V3 (HAS-428)
 public enum Metric {
     BATTERY(0x01, 0, "battery", "battery"),
     PRESSURE(0x04, 0, "pressure", "pressure"),
@@ -61,11 +60,6 @@ public enum Metric {
 
     public Source source() {
         return source;
-    }
-
-    //whether weather_reading has its column: the air quality is not stored before HAS-428
-    public boolean isStored() {
-        return source == Source.BTHOME;
     }
 
     public String column() {

@@ -44,14 +44,12 @@ class MetricTest {
             "temperature", "uv", "windDirection", "precipitation", "pm1", "pm25", "pm10", "airQualityLevel");
     }
 
-    //HAS-427: the air quality comes over HTTP - no BTHome object finds it, and it is not stored before HAS-428
+    //HAS-427: the air quality comes over HTTP - no BTHome object finds it; its columns came with V3 (HAS-428)
     @Test
     void should_keep_the_air_quality_apart_from_the_objects_of_the_station() {
         assertThat(Metric.values()).filteredOn(metric -> metric.source() == Metric.Source.HTTP)
-            .containsExactly(Metric.PM1, Metric.PM25, Metric.PM10, Metric.AIR_QUALITY_LEVEL)
-            .noneMatch(Metric::isStored);
+            .containsExactly(Metric.PM1, Metric.PM25, Metric.PM10, Metric.AIR_QUALITY_LEVEL);
         assertThat(Metric.of(-1, -1)).isEmpty();
-        assertThat(Metric.values()).filteredOn(metric -> metric.source() == Metric.Source.BTHOME).allMatch(Metric::isStored);
         assertThat(Metric.values()).extracting(Metric::column).contains("pm1", "pm25", "pm10", "air_quality_level");
     }
 

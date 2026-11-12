@@ -1,9 +1,18 @@
 package cloud.cholewa.weather.reading;
 
+import cloud.cholewa.home.model.BleboxBinding;
+import cloud.cholewa.home.model.DeviceKind;
+import cloud.cholewa.home.model.RoomName;
+import cloud.cholewa.home.model.SmartDevice;
+import cloud.cholewa.home.model.SmartVendor;
+import cloud.cholewa.weather.air.AirQuality;
+import cloud.cholewa.weather.air.AirSensorClient;
+import cloud.cholewa.weather.air.AirStateResponse;
 import cloud.cholewa.weather.database.model.WeatherReadingEntity;
 import cloud.cholewa.weather.database.repository.WeatherReadingRepository;
 import cloud.cholewa.weather.model.Metric;
 import cloud.cholewa.weather.model.Reading;
+import cloud.cholewa.weather.registry.DeviceRegistryClient;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
@@ -15,6 +24,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -33,7 +43,10 @@ class WeatherSnapshotTest {
 
     private final CurrentWeather currentWeather = new CurrentWeather(CLOCK);
     private final WeatherReadingRepository repository = mock(WeatherReadingRepository.class);
-    private final WeatherSnapshot sut = new WeatherSnapshot(currentWeather, repository, CLOCK);
+    private final DeviceRegistryClient registry = mock(DeviceRegistryClient.class);
+    private final AirSensorClient airSensorClient = mock(AirSensorClient.class);
+    private final AirQuality airQuality = new AirQuality(registry, airSensorClient, CLOCK);
+    private final WeatherSnapshot sut = new WeatherSnapshot(currentWeather, airQuality, repository, CLOCK);
 
     @Test
     void should_store_the_state_at_house_time_when_something_changed() {
@@ -165,6 +178,78 @@ class WeatherSnapshotTest {
         sut.snapshot().as(StepVerifier::create).verifyComplete();
 
         verify(repository, times(2)).save(any());
+    }
+
+    //HAS-428: a new reading of the air sensor alone writes the whole state - the air quality beside the weather
+    @Test
+    void should_store_the_whole_state_when_only_the_air_quality_changed() {
+        nothingStored();
+        currentWeather.observe(Metric.TEMPERATURE, Reading.number(new BigDecimal("8.6"), AT.minusSeconds(120)));
+        sut.snapshot().block();
+        airSensorMeasured(31, 60);
+
+        sut.snapshot().block();
+
+        final ArgumentCaptor<WeatherReadingEntity> saved = ArgumentCaptor.forClass(WeatherReadingEntity.class);
+        verify(repository, times(2)).save(saved.capture());
+        final WeatherReadingEntity second = saved.getAllValues().get(1);
+        assertThat(second.temperature()).isEqualByComparingTo("8.6");
+        assertThat(second.pm10()).isEqualTo(31);
+        assertThat(second.airQualityLevel()).isEqualTo(2);
+        assertThat(second.measuredAt()).isEqualTo(LocalDateTime.of(2026, 10, 16, 9, 20, 28));
+    }
+
+    //the same value read again is no change: no row for it
+    @Test
+    void should_store_nothing_for_the_same_air_quality_read_again() {
+        nothingStored();
+        airSensorMeasured(31, 60);
+        sut.snapshot().block();
+        airSensorMeasured(31, 60);
+
+        sut.snapshot().block();
+
+        verify(repository, times(1)).save(any());
+    }
+
+    //the latest row restores each its own: the air quality into AirQuality, the weather into CurrentWeather -
+    //a reading of the sensor is no sign of life of the station
+    @Test
+    void should_restore_the_air_quality_apart_from_the_station() {
+        when(repository.findFirstByOrderByIdDesc()).thenReturn(Mono.just(WeatherReadingEntity.builder()
+            .id(7L).measuredAt(LocalDateTime.of(2026, 10, 16, 9, 0)).pressure(new BigDecimal("993.30")).pm25(30).build()));
+
+        sut.snapshot().block();
+
+        assertThat(currentWeather.readings()).containsOnlyKeys(Metric.PRESSURE);
+        assertThat(airQuality.readings()).containsOnlyKeys(Metric.PM25);
+        assertThat(airQuality.lastReadingAt()).contains(Instant.parse("2026-10-16T07:00:00Z"));
+        verify(repository, never()).save(any());
+    }
+
+    //a row that could not be stored keeps the change of the air quality for the next pass too
+    @Test
+    void should_keep_the_air_quality_for_the_next_pass_when_the_insert_fails() {
+        when(repository.findFirstByOrderByIdDesc()).thenReturn(Mono.empty());
+        when(repository.save(any()))
+            .thenReturn(Mono.error(new IllegalStateException("database away")))
+            .thenAnswer(call -> Mono.just(call.getArgument(0)));
+        airSensorMeasured(31, 60);
+
+        sut.snapshot().as(StepVerifier::create).verifyComplete();
+        sut.snapshot().as(StepVerifier::create).verifyComplete();
+
+        verify(repository, times(2)).save(any());
+    }
+
+    private void airSensorMeasured(final int pm10, final long secondsAgo) {
+        when(registry.getDevices(DeviceKind.AIR_QUALITY_SENSOR)).thenReturn(Mono.just(List.of(SmartDevice.builder()
+            .id(145L).name("Air quality sensor").room(RoomName.GARDEN).kind(DeviceKind.AIR_QUALITY_SENSOR).enabled(true)
+            .vendor(SmartVendor.BLEBOX).blebox(BleboxBinding.builder().address("192.0.2.23").deviceId("0123456789ab").build())
+            .build())));
+        when(airSensorClient.state("192.0.2.23")).thenReturn(Mono.just(new AirStateResponse(new AirStateResponse.Air(2,
+            List.of(new AirStateResponse.Sensor("pm10", pm10, 3, 0, 2, secondsAgo))))));
+        airQuality.refresh().then(airQuality.poll()).block();
     }
 
     private void nothingStored() {

@@ -185,7 +185,7 @@ class WeatherControllerTest {
             .jsonPath("$.errors[0].code").isEqualTo("UNKNOWN_METRIC")
             .jsonPath("$.errors[0].message").isEqualTo("Unknown metric")
             .jsonPath("$.errors[0].details").isEqualTo("metric must be one of: battery, pressure, illuminance, dewPoint, "
-                + "voltage, raining, humidity, wind, gust, temperature, uv, windDirection, precipitation");
+                + "voltage, raining, humidity, wind, gust, temperature, uv, windDirection, precipitation, pm1, pm25, pm10, airQualityLevel");
     }
 
     @Test

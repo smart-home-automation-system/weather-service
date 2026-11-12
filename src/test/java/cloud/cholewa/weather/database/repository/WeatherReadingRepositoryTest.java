@@ -64,7 +64,7 @@ class WeatherReadingRepositoryTest {
     void should_store_a_whole_reading_as_it_was_taken() {
         final WeatherReadingEntity reading = new WeatherReadingEntity(null, AT, new BigDecimal("4.4"), 98,
             new BigDecimal("4.11"), new BigDecimal("993.30"), 3310, new BigDecimal("0.0"), new BigDecimal("1.10"),
-            new BigDecimal("1.70"), 173, true, new BigDecimal("4311.0"), 100, new BigDecimal("4.20"));
+            new BigDecimal("1.70"), 173, true, new BigDecimal("4311.0"), 100, new BigDecimal("4.20"), 22, 30, 31, 2);
 
         final WeatherReadingEntity saved = sut.save(reading).block();
 

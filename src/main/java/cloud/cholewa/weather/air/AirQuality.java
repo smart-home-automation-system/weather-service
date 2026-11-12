@@ -28,8 +28,12 @@ import java.util.concurrent.atomic.AtomicReference;
 //clears it all. The sensor itself is read every minute (AirQualityPoll); a failed read keeps the readings
 //and is one WARN an hour per kind of failure, never an error out of the pass.
 //The readings follow CurrentWeather.seed: a metric not held yet, or another value measured strictly later,
-//becomes the state; the same value at a later time confirms it (no change - for the rows of HAS-428 - but
-//the current weather of the read API shows the value with that time). The poll and the read API run on other threads, hence one lock
+//becomes the state; the same value at a later time confirms it (no change - no row - but the current weather
+//of the read API shows the value with that time).
+//Since HAS-428 the readings ride the rows of weather_reading: a value taken marks a change, WeatherSnapshot
+//takes it once a minute with the state of the station (takeChange, snapshotFailed), and the latest row brings
+//them back at the start (restore - the sensor counted as measured then). The poll, the snapshot and the read
+//API run on other threads, hence one lock
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -53,6 +57,7 @@ public class AirQuality {
     private final Map<Metric, Reading> readings = new EnumMap<>(Metric.class);
     private final Map<Metric, Instant> confirmed = new EnumMap<>(Metric.class);
     private final Map<AirSensorCallException.Kind, Instant> warnedAt = new EnumMap<>(AirSensorCallException.Kind.class);
+    private boolean changedSinceSnapshot;
 
     //the sensor from the registry; never signals an error
     public Mono<Void> refresh() {
@@ -94,6 +99,42 @@ public class AirQuality {
         }
     }
 
+    //the readings as they were measured - what a row of weather_reading stores
+    public Map<Metric, Reading> readings() {
+        synchronized (readings) {
+            return Map.copyOf(readings);
+        }
+    }
+
+    //whether a reading was taken since the last call - the snapshot asks once a minute, and that resets it
+    public boolean takeChange() {
+        synchronized (readings) {
+            final boolean changed = changedSinceSnapshot;
+            changedSinceSnapshot = false;
+            return changed;
+        }
+    }
+
+    //a row that could not be stored: the next pass stores the readings again
+    public void snapshotFailed() {
+        synchronized (readings) {
+            changedSinceSnapshot = true;
+        }
+    }
+
+    //the readings of the latest row, at the start: fills only what no read of the sensor has brought since
+    public void restore(final Map<Metric, Reading> stored) {
+        synchronized (readings) {
+            stored.forEach((metric, reading) -> {
+                final Reading held = readings.get(metric);
+                if (held == null || held.measuredAt().isBefore(reading.measuredAt())) {
+                    readings.put(metric, reading);
+                    confirmed.put(metric, reading.measuredAt());
+                }
+            });
+        }
+    }
+
     //the state as the read API shows it: each value with the newest time it was confirmed
     public Map<Metric, Reading> confirmedReadings() {
         synchronized (readings) {
@@ -111,7 +152,9 @@ public class AirQuality {
         if (same && !first) {
             return;
         }
-        if (!same) {
+        //another sensor: what the last one measured is not a reading of this one; the first read of the
+        //registry keeps what the latest row restored
+        if (!same && previous != null) {
             clear();
         }
         if (read == null) {
@@ -126,6 +169,7 @@ public class AirQuality {
             readings.clear();
             confirmed.clear();
             warnedAt.clear();
+            changedSinceSnapshot = false;
         }
         lastCheck.set(null);
     }
@@ -177,6 +221,7 @@ public class AirQuality {
         if (held == null || reading.measuredAt().isAfter(held.measuredAt()) && !sameValue(held, reading)) {
             readings.put(metric, reading);
             confirmed.put(metric, reading.measuredAt());
+            changedSinceSnapshot = true;
         } else if (sameValue(held, reading)) {
             confirmed.merge(metric, reading.measuredAt(), (was, next) -> next.isAfter(was) ? next : was);
         }
