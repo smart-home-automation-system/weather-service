@@ -122,6 +122,30 @@ class WeatherHistoryRepositoryTest {
             .verifyComplete();
     }
 
+    //HAS-428: the four columns of the air quality (V3) answer as every whole-number column
+    @Test
+    void should_answer_the_history_of_every_metric_of_the_air_quality() {
+        databaseClient.sql("""
+                INSERT INTO weather_reading (measured_at, pm1, pm25, pm10, air_quality_level)
+                VALUES (:first, 20, 28, 30, 2), (:second, 24, 34, 36, 3)""")
+            .bind("first", DAY.plusMinutes(1))
+            .bind("second", DAY.plusMinutes(3))
+            .then().block();
+
+        sut.findHistory(Metric.PM1, DAY, DAY.plusDays(1), 300).collectList().as(StepVerifier::create)
+            .assertNext(points -> assertThat(points).containsExactly(point(DAY, "22.00", "20", "24")))
+            .verifyComplete();
+        sut.findHistory(Metric.PM25, DAY, DAY.plusDays(1), 300).collectList().as(StepVerifier::create)
+            .assertNext(points -> assertThat(points).containsExactly(point(DAY, "31.00", "28", "34")))
+            .verifyComplete();
+        sut.findHistory(Metric.PM10, DAY, DAY.plusDays(1), 300).collectList().as(StepVerifier::create)
+            .assertNext(points -> assertThat(points).containsExactly(point(DAY, "33.00", "30", "36")))
+            .verifyComplete();
+        sut.findHistory(Metric.AIR_QUALITY_LEVEL, DAY, DAY.plusDays(1), 300).collectList().as(StepVerifier::create)
+            .assertNext(points -> assertThat(points).containsExactly(point(DAY, "2.50", "2", "3")))
+            .verifyComplete();
+    }
+
     //a whole-number column answers as a number like the others
     @Test
     void should_answer_a_whole_number_column() {

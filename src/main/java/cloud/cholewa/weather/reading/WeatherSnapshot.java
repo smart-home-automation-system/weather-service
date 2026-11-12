@@ -1,7 +1,10 @@
 package cloud.cholewa.weather.reading;
 
 import cloud.cholewa.commons.scheduling.ScheduledPass;
+import cloud.cholewa.weather.air.AirQuality;
 import cloud.cholewa.weather.database.repository.WeatherReadingRepository;
+import cloud.cholewa.weather.model.Metric;
+import cloud.cholewa.weather.model.Reading;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.SmartLifecycle;
@@ -11,6 +14,10 @@ import reactor.core.publisher.Mono;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.EnumMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 //Once a minute the current state becomes a row of weather_reading - when anything changed since the
@@ -23,6 +30,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 //change, so a change the pod took off the queue and never stored would be lost until the next one.
 //The row is logged at INFO: one line a minute, and the way to compare the state with
 //BTHomeSensor.GetStatus of the gateway until the read API comes (HAS-238).
+//The row is the whole state - the station and, since HAS-428, the air quality (AirQuality, held apart from
+//the station): a change of either writes it, and the latest row restores both, each its own metrics.
 //Spring subscribes again to the same Mono for every run, so everything happens inside Mono.defer.
 //Scheduling is off under the test profile
 @Slf4j
@@ -38,6 +47,7 @@ public class WeatherSnapshot implements SmartLifecycle {
     static final Duration LIMIT = Duration.ofSeconds(50);
 
     private final CurrentWeather currentWeather;
+    private final AirQuality airQuality;
     private final WeatherReadingRepository weatherReadingRepository;
     private final Clock clock;
 
@@ -56,7 +66,9 @@ public class WeatherSnapshot implements SmartLifecycle {
         }
         return weatherReadingRepository.findFirstByOrderByIdDesc()
             .doOnNext(latest -> {
-                currentWeather.restore(ReadingMapper.toReadings(latest, clock.getZone()));
+                final Map<Metric, Reading> stored = ReadingMapper.toReadings(latest, clock.getZone());
+                currentWeather.restore(only(stored, Metric.Source.BTHOME));
+                airQuality.restore(only(stored, Metric.Source.HTTP));
                 log.info("Weather state restored from the reading {} measured at {}", latest.id(), latest.measuredAt());
             })
             .doOnSuccess(ignored -> restored.set(true))
@@ -71,19 +83,50 @@ public class WeatherSnapshot implements SmartLifecycle {
     }
 
     private Mono<Void> store() {
-        return Mono.justOrEmpty(currentWeather.takeSnapshot())
+        return Mono.fromCallable(this::takeSnapshot)
+            .flatMap(Mono::justOrEmpty)
             .flatMap(snapshot -> Mono.fromCallable(() -> ReadingMapper.toEntity(snapshot, clock.getZone()))
                 .flatMap(weatherReadingRepository::save)
                 .doOnNext(saved -> log.info("Weather reading stored: {}", saved))
                 //cut by the bound of the pass: the row may or may not be stored - the next pass stores the state again
-                .doOnCancel(currentWeather::snapshotFailed)
+                .doOnCancel(this::snapshotFailed)
                 .doOnError(e -> {
-                    currentWeather.snapshotFailed();
+                    snapshotFailed();
                     log.warn("Weather reading measured at {} could not be stored, tried again in a minute: {}",
                         snapshot.measuredAt(), e.toString());
                 })
                 .onErrorComplete())
             .then();
+    }
+
+    //the state of the station and the air quality as one row, or nothing when neither changed since the last one;
+    //the newest measurement of the two is the time of the row
+    private Optional<CurrentWeather.Snapshot> takeSnapshot() {
+        final Optional<CurrentWeather.Snapshot> station = currentWeather.takeSnapshot();
+        final boolean airChanged = airQuality.takeChange();
+        final Map<Metric, Reading> readings = new EnumMap<>(Metric.class);
+        readings.putAll(station.map(CurrentWeather.Snapshot::readings).orElseGet(currentWeather::readings));
+        readings.putAll(airQuality.readings());
+        if ((station.isEmpty() && !airChanged) || readings.isEmpty()) {
+            return Optional.empty();
+        }
+        final Instant newest = readings.values().stream().map(Reading::measuredAt).max(Instant::compareTo).orElseThrow();
+        return Optional.of(new CurrentWeather.Snapshot(newest, readings));
+    }
+
+    private void snapshotFailed() {
+        currentWeather.snapshotFailed();
+        airQuality.snapshotFailed();
+    }
+
+    private static Map<Metric, Reading> only(final Map<Metric, Reading> readings, final Metric.Source source) {
+        final Map<Metric, Reading> of = new EnumMap<>(Metric.class);
+        readings.forEach((metric, reading) -> {
+            if (metric.source() == source) {
+                of.put(metric, reading);
+            }
+        });
+        return of;
     }
 
     @Override

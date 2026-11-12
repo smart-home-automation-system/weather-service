@@ -55,13 +55,18 @@ class WeatherHistoryServiceTest {
         verifyNoInteractions(repository);
     }
 
-    //HAS-427: the air quality is not stored before HAS-428 - its history is no metric yet, never a query of a column that is not there
+    //HAS-428: the air quality is stored since V3 - its history is read from its column like every metric
     @Test
-    void should_refuse_the_air_quality_until_it_is_stored() {
-        sut.queryHistory("pm10", FROM, FROM.plusDays(1)).as(StepVerifier::create)
-            .verifyErrorSatisfies(error -> assertThat(((WeatherException) error).getError()).isEqualTo(WeatherError.UNKNOWN_METRIC));
+    void should_answer_the_history_of_the_air_quality() {
+        when(repository.findHistory(Metric.PM25, FROM, FROM.plusDays(2), 300)).thenReturn(Flux.empty());
 
-        verifyNoInteractions(repository);
+        sut.queryHistory("pm25", FROM, FROM.plusDays(2)).as(StepVerifier::create)
+            .assertNext(reply -> {
+                assertThat(reply.metric()).isEqualTo("pm25");
+                assertThat(reply.bucketSeconds()).isEqualTo(300);
+                assertThat(reply.points()).isEmpty();
+            })
+            .verifyComplete();
     }
 
     @Test

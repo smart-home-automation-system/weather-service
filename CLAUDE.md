@@ -30,8 +30,9 @@ the service code) holds everywhere else.
   2.7.0 (the decoder, `dynamicComponents` - added to the library for this service in HAS-236).
 - Database: own database `home-automation-weather`, pool `database.pool.max-size: 2` (heating 2 /
   database 4 / water 2 / presence 2 / blinds 2 / weather 2 = 14 of 22), pinned by
-  `WeatherServiceApplicationTest`. `V1__weather_reading.sql`, `V2__station_alert.sql`; the next
-  migration is V3.
+  `WeatherServiceApplicationTest`. `V1__weather_reading.sql`, `V2__station_alert.sql`, `V3__air_quality.sql`
+  (HAS-428: `pm1`, `pm25`, `pm10`, `air_quality_level` on `weather_reading`, SMALLINT, nullable); the next
+  migration is V4.
 - Integrates with hardware: the WS90 (`08:b9:5f:d1:e6:71`, registry id 55) through the Plug S Gen3
   TREADMILL (registry id 54), paired in HAS-234 - the notes, the sensor ids and how to re-pair are in
   `deployment-tools/scripts/shelly/devices.md`. Every device runs with `enable_rpc: false`, so only
@@ -161,8 +162,14 @@ the service code) holds everywhere else.
   not in `CurrentWeather`**: the station's `heardAt`, link, snapshot and `clear()` are the station's, and
   the sensor's silence must not move them; the readings follow `CurrentWeather.seed` (the same value later
   confirms). `Metric` has a `Source` - the four `HTTP` metrics (`pm1`, `pm25`, `pm10`, `airQualityLevel`)
-  have no BTHome object, so `Metric.of` never finds them; **they are not stored before HAS-428**
-  (`isStored`): `WeatherSnapshot` writes nothing for them and the history answers `UNKNOWN_METRIC`.
+  have no BTHome object, so `Metric.of` never finds them. **Stored since HAS-428** (V3) on the rows of the
+  weather: a value `AirQuality` takes marks a change (`takeChange`), and `WeatherSnapshot` writes the whole
+  state - the station's snapshot or its readings as held, plus the air quality - when either changed, the
+  newest measurement of the two the time of the row; a failed or cut insert marks both again. The restore
+  splits the latest row by `Metric.Source`: the weather into `CurrentWeather` (its `heardAt` from it), the air
+  quality into `AirQuality.restore` - kept through the first read of the registry (only another sensor
+  clears). Rehearsed 2026-11-12 on a throwaway PostgreSQL: 0.5.0 -> the new build (V3 over its row) -> 0.5.0
+  again on V3, restoring a row with the air quality - a rollback reads the rows. `/history` answers the four.
   `/status` gains `airSensor {address, reachable, checkedAt, lastReadingAt}`; the watch of the sensor is
   HAS-429.
 - **The read API** (HAS-238): `WeatherController` -> `CurrentWeatherQuery` (memory) and
@@ -180,6 +187,7 @@ the service code) holds everywhere else.
   `precipitation` is **not confirmed** (raw 4311, the running total) - compare a day of rain with the
   Shelly app.
 - **The retention** (`WeatherRetention`, 03:10 house time): rows older than `weather.retention`
-  (730d, `@DurationUnit(DAYS)`, 30d-3650d, `RetentionPropertiesTest`), never the latest row.
+  (730d, `@DurationUnit(DAYS)`, 30d-3650d, `RetentionPropertiesTest`), never the latest row. The air quality
+  rides the same rows (V3) - nothing of its own to delete.
 - **Surefire activates the `test` profile for every class**; the `includes` match only
   `**/*Test.java` and `**/*IT.java`. Tests use `mockwebserver3`.

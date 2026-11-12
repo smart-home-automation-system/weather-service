@@ -30,6 +30,7 @@ final class ReadingMapper {
     private static final BigDecimal SMALLINT = BigDecimal.valueOf(Short.MAX_VALUE);
     private static final BigDecimal INTEGER = BigDecimal.valueOf(Integer.MAX_VALUE);
 
+    //the air quality (V3, HAS-428): whole numbers, as the sensor gives them
     static WeatherReadingEntity toEntity(final CurrentWeather.Snapshot snapshot, final ZoneId zone) {
         final Map<Metric, Reading> readings = snapshot.readings();
         return WeatherReadingEntity.builder()
@@ -47,6 +48,10 @@ final class ReadingMapper {
             .precipitation(number(readings, Metric.PRECIPITATION, 6, 1))
             .battery(whole(readings, Metric.BATTERY, SMALLINT))
             .voltage(number(readings, Metric.VOLTAGE, 4, 2))
+            .pm1(whole(readings, Metric.PM1, SMALLINT))
+            .pm25(whole(readings, Metric.PM25, SMALLINT))
+            .pm10(whole(readings, Metric.PM10, SMALLINT))
+            .airQualityLevel(whole(readings, Metric.AIR_QUALITY_LEVEL, SMALLINT))
             .build();
     }
 
@@ -65,6 +70,10 @@ final class ReadingMapper {
         put(readings, Metric.PRECIPITATION, entity.precipitation(), at);
         put(readings, Metric.BATTERY, whole(entity.battery()), at);
         put(readings, Metric.VOLTAGE, entity.voltage(), at);
+        put(readings, Metric.PM1, whole(entity.pm1()), at);
+        put(readings, Metric.PM25, whole(entity.pm25()), at);
+        put(readings, Metric.PM10, whole(entity.pm10()), at);
+        put(readings, Metric.AIR_QUALITY_LEVEL, whole(entity.airQualityLevel()), at);
         if (entity.raining() != null) {
             readings.put(Metric.RAIN, Reading.flag(entity.raining(), at));
         }

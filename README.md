@@ -73,7 +73,7 @@ Everything is non-blocking (Spring WebFlux / Reactor):
   has no clock, so a reading is measured at the time of the read minus its `elapsedTimeS`; a sensor in
   error (`state` 3), without a measurement (`elapsedTimeS` -1) or without a value is no reading; the
   same value read again confirms it. Held in memory apart from the station (its silence is not the
-  station's); stored from HAS-428. A failed read keeps the readings and is one WARN an hour per kind
+  station's); stored in `weather_reading` beside the weather since HAS-428. A failed read keeps the readings and is one WARN an hour per kind
   of failure.
 - **Once a minute** the state becomes a row of `weather_reading` - only when something changed since
   the last row; each row is logged at INFO. At the start the state is restored from the latest row
@@ -144,7 +144,7 @@ date-time is house time without an offset.
 | `precipitation` | **not confirmed** | the running total of the station as the gateway reports it (4311 in October 2026); compare with the app on the first rain. History: `max - min` of a bucket is its rain |
 | `battery` | % | |
 | `voltage` | V | |
-| `pm1` | µg/m³ | the air quality sensor (HAS-427), a whole number; no history before HAS-428 |
+| `pm1` | µg/m³ | the air quality sensor (HAS-427), a whole number; history since HAS-428 |
 | `pm25` | µg/m³ | PM2.5, the same |
 | `pm10` | µg/m³ | PM10, the same |
 | `airQualityLevel` | 1 - 6 | the level the sensor gives (the GIOS scale, 1 very good ... 6 very bad), measured with the newest of the three |
@@ -164,7 +164,7 @@ date-time is house time without an offset.
   **buckets** are chosen by the service and named in `bucketSeconds`: **5 min** for up to 2 days,
   **30 min** up to 8 days, **2 h** beyond, aligned to the clock of the house; a bucket without a
   reading has no point. `avg` is rounded to 2 decimals. A `metric` outside the list is a 400 with
-  the code `UNKNOWN_METRIC` - so are the four of the air quality until HAS-428 stores them. One range is queried at a time, each cut off after 10 s. The night the
+  the code `UNKNOWN_METRIC`. One range is queried at a time, each cut off after 10 s. The night the
   summer time begins has a gap of an hour, the night it ends puts the repeated hour into the same
   buckets.
 
@@ -179,6 +179,10 @@ date-time is house time without an offset.
   the station, 0.01), `illuminance` (lx), `uv` (0.1), `wind` and `gust` (m/s, 0.01),
   `wind_direction` (°), `raining`, `precipitation` (the running total of the station - unit not
   confirmed yet), `battery` (%), `voltage` (V, 0.01). Kept for `weather.retention` (730 days).
+- `V3__air_quality.sql` (HAS-428) - the air quality on the same rows: `pm1`, `pm25`, `pm10` (µg/m³) and
+  `air_quality_level` (1 - 6), whole numbers, nullable - a row written before V3, or while the sensor was
+  never read, has none. A new reading of the sensor alone writes a row of the whole state; the retention
+  deletes them with their rows.
 - `V2__station_alert.sql` - `station_alert`: the alerts of the watch that are open now, one row per
   watch (`STATION`, `GATEWAY`) with the id of the station in the registry, since when and when the
   household was last told (`timestamptz`); removed when it is over. An alert about a station the

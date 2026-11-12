@@ -57,12 +57,16 @@ class ReadingMapperTest {
         readings.put(Metric.GUST, number("1.7"));
         readings.put(Metric.UV, number("0.0"));
         readings.put(Metric.WIND_DIRECTION, number("173.0"));
+        readings.put(Metric.PM1, number("22"));
+        readings.put(Metric.PM25, number("30"));
+        readings.put(Metric.PM10, number("31"));
+        readings.put(Metric.AIR_QUALITY_LEVEL, number("2"));
 
         final WeatherReadingEntity entity = ReadingMapper.toEntity(new CurrentWeather.Snapshot(AT, readings), HOUSE);
 
         assertThat(entity).isEqualTo(new WeatherReadingEntity(null, LOCAL, new BigDecimal("4.4"), 98, new BigDecimal("4.11"),
             new BigDecimal("993.30"), 3310, new BigDecimal("0.0"), new BigDecimal("1.10"), new BigDecimal("1.70"), 173,
-            true, new BigDecimal("4311.0"), 100, new BigDecimal("4.20")));
+            true, new BigDecimal("4311.0"), 100, new BigDecimal("4.20"), 22, 30, 31, 2));
         assertThat(mapperLog.list).isEmpty();
     }
 
