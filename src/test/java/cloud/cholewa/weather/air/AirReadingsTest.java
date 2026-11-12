@@ -47,9 +47,8 @@ class AirReadingsTest {
     //the level is measured when the newest particle reading was; below the scale it is none
     @Test
     void should_date_the_level_by_the_newest_reading_and_take_none_below_the_scale() {
-        assertThat(AirReadings.of(answer(3, sensor("pm1", 7, 0, 600L), sensor("pm10", 40, 0, 60L)), NOW)
-            .get(Metric.AIR_QUALITY_LEVEL))
-            .isEqualTo(Reading.number(new BigDecimal("3"), Instant.parse("2026-11-12T12:59:00Z")));
+        assertThat(AirReadings.of(answer(3, sensor("pm1", 7, 0, 600L), sensor("pm10", 40, 0, 60L)), NOW))
+            .containsEntry(Metric.AIR_QUALITY_LEVEL, Reading.number(new BigDecimal("3"), Instant.parse("2026-11-12T12:59:00Z")));
         assertThat(AirReadings.of(answer(-1, sensor("pm10", 40, 0, 60L)), NOW)).containsOnlyKeys(Metric.PM10);
         assertThat(AirReadings.of(answer(null, sensor("pm10", 40, 0, 60L)), NOW)).containsOnlyKeys(Metric.PM10);
     }

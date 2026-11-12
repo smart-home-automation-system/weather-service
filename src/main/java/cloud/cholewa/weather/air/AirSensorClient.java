@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
+import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
 
 import java.net.ConnectException;
@@ -21,8 +22,6 @@ import java.util.concurrent.TimeoutException;
 @Component
 public class AirSensorClient {
 
-    static final String STATE_PATH = "/api/air/state";
-
     private final WebClient airSensorWebClient;
 
     public AirSensorClient(@Qualifier("airSensorWebClient") final WebClient airSensorWebClient) {
@@ -32,7 +31,7 @@ public class AirSensorClient {
     public Mono<AirStateResponse> state(final String address) {
         return airSensorWebClient
             .get()
-            .uri("http://" + address + STATE_PATH)
+            .uri(UriComponentsBuilder.fromUriString("http://" + address).pathSegment("api", "air", "state").build().toUri())
             .retrieve()
             .onStatus(HttpStatusCode::isError, response -> response.releaseBody()
                 .then(Mono.error(() -> new AirSensorCallException(AirSensorCallException.Kind.STATUS,

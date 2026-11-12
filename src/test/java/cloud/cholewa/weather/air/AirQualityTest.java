@@ -127,8 +127,8 @@ class AirQualityTest {
         clock.move(Duration.ofMinutes(1));
         sut.poll().as(StepVerifier::create).verifyComplete();
 
-        assertThat(sut.confirmedReadings().get(Metric.PM10))
-            .isEqualTo(Reading.number(new BigDecimal("55"), START.plusSeconds(40)));
+        assertThat(sut.confirmedReadings())
+            .containsEntry(Metric.PM10, Reading.number(new BigDecimal("55"), START.plusSeconds(40)));
     }
 
     //a failed read keeps the readings, says so once an hour per kind, and is never an error of the pass

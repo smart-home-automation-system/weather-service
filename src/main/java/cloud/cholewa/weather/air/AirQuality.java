@@ -29,7 +29,7 @@ import java.util.concurrent.atomic.AtomicReference;
 //and is one WARN an hour per kind of failure, never an error out of the pass.
 //The readings follow CurrentWeather.seed: a metric not held yet, or another value measured strictly later,
 //becomes the state; the same value at a later time confirms it (no change - for the rows of HAS-428 - but
-///current shows the value with that time). The poll and the read API run on other threads, hence one lock
+//the current weather of the read API shows the value with that time). The poll and the read API run on other threads, hence one lock
 @Slf4j
 @Component
 @RequiredArgsConstructor
