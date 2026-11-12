@@ -1,5 +1,6 @@
 package cloud.cholewa.weather.current;
 
+import cloud.cholewa.weather.air.AirQuality;
 import cloud.cholewa.weather.api.model.CurrentMetric;
 import cloud.cholewa.weather.api.model.StationStatus;
 import cloud.cholewa.weather.config.MonitorProperties;
@@ -14,10 +15,12 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-//What the read API answers from memory: the current state and how the station is heard. Old is
+//What the read API answers from memory: the current state and how the station is heard - and the air
+//quality sensor (HAS-427), whose readings stand beside those of the station. Old is
 //"older than weather.monitor.silent-after" - the threshold of the alerts, so the dashboard shows as
 //stale what the household is told about. Times go out as house time without an offset, to the second
 @Service
@@ -26,14 +29,18 @@ public class CurrentWeatherQuery {
 
     private final CurrentWeather currentWeather;
     private final WeatherStation weatherStation;
+    private final AirQuality airQuality;
     private final MonitorProperties monitorProperties;
     private final Clock clock;
 
     //per metric of the read API, in the order of Metric; a metric never received is left out
     public Map<String, CurrentMetric> current() {
         final Instant now = clock.instant();
+        final Map<Metric, Reading> readings = new EnumMap<>(Metric.class);
+        readings.putAll(currentWeather.confirmedReadings());
+        readings.putAll(airQuality.confirmedReadings());
         final Map<String, CurrentMetric> current = new LinkedHashMap<>();
-        currentWeather.confirmedReadings().forEach((metric, reading) ->
+        readings.forEach((metric, reading) ->
             current.put(metric.apiName(), new CurrentMetric(value(metric, reading), houseTime(reading.measuredAt()),
                 isOld(reading.measuredAt(), now))));
         return current;
@@ -47,7 +54,20 @@ public class CurrentWeatherQuery {
                 .orElseGet(() -> new StationStatus.Gateway(station.gatewayDeviceId(), null, null)))
             .orElse(null);
         final Instant heardAt = currentWeather.heardAt().orElse(null);
-        return new StationStatus(gateway, heardAt == null ? null : houseTime(heardAt), heardAt == null || isOld(heardAt, now));
+        return new StationStatus(gateway, heardAt == null ? null : houseTime(heardAt), heardAt == null || isOld(heardAt, now),
+            airSensor());
+    }
+
+    private StationStatus.AirSensor airSensor() {
+        return airQuality.sensor()
+            .map(sensor -> {
+                final AirQuality.Check check = airQuality.lastCheck().orElse(null);
+                final LocalDateTime lastReadingAt = airQuality.lastReadingAt().map(this::houseTime).orElse(null);
+                return check == null
+                    ? new StationStatus.AirSensor(sensor.address(), null, null, lastReadingAt)
+                    : new StationStatus.AirSensor(sensor.address(), check.answered(), houseTime(check.checkedAt()), lastReadingAt);
+            })
+            .orElse(null);
     }
 
     private static Object value(final Metric metric, final Reading reading) {

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -46,8 +47,8 @@ class CurrentWeatherTest {
     void should_take_a_reading_after_the_clocks_go_back() {
         final Instant beforeTheChange = Instant.parse("2026-10-25T00:58:00Z");
         final Instant afterTheChange = Instant.parse("2026-10-25T01:01:00Z");
-        assertThat(LocalDateTime.ofInstant(afterTheChange, java.time.ZoneId.of("Europe/Warsaw")))
-            .isBefore(LocalDateTime.ofInstant(beforeTheChange, java.time.ZoneId.of("Europe/Warsaw")));
+        assertThat(LocalDateTime.ofInstant(afterTheChange, ZoneId.of("Europe/Warsaw")))
+            .isBefore(LocalDateTime.ofInstant(beforeTheChange, ZoneId.of("Europe/Warsaw")));
         sut.observe(Metric.TEMPERATURE, number("4.4", beforeTheChange));
 
         assertThat(sut.observe(Metric.TEMPERATURE, number("4.2", afterTheChange))).isTrue();

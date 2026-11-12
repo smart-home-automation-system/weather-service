@@ -10,7 +10,10 @@ import java.util.Optional;
 //RAIN is the only flag, every other metric a number.
 //The api name is what the read API calls a metric (the keys of /current, the metric of /history) -
 //wire contract of the dashboard and the blinds schedules, pinned by MetricTest; the column is the one
-//of weather_reading (V1) the history reads
+//of weather_reading (V1) the history reads.
+//The air quality (HAS-427) is no BTHome object: the BleBox airSensor outside the house is polled over HTTP
+//(Source.HTTP), so of(objectId, index) never finds those four. Their columns arrive with the storage task
+//(HAS-428); until then they are not stored, and the history does not know them (stored)
 public enum Metric {
     BATTERY(0x01, 0, "battery", "battery"),
     PRESSURE(0x04, 0, "pressure", "pressure"),
@@ -24,18 +27,45 @@ public enum Metric {
     TEMPERATURE(0x45, 0, "temperature", "temperature"),
     UV(0x46, 0, "uv", "uv"),
     WIND_DIRECTION(0x5E, 0, "windDirection", "wind_direction"),
-    PRECIPITATION(0x5F, 0, "precipitation", "precipitation");
+    PRECIPITATION(0x5F, 0, "precipitation", "precipitation"),
+    PM1("pm1", "pm1"),
+    PM25("pm25", "pm25"),
+    PM10("pm10", "pm10"),
+    AIR_QUALITY_LEVEL("airQualityLevel", "air_quality_level");
 
+    //where a metric comes from: a BTHome object the gateway hears, or the HTTP API of the air sensor
+    public enum Source { BTHOME, HTTP }
+
+    private final Source source;
     private final int objectId;
     private final int index;
     private final String apiName;
     private final String column;
 
     Metric(final int objectId, final int index, final String apiName, final String column) {
+        this.source = Source.BTHOME;
         this.objectId = objectId;
         this.index = index;
         this.apiName = apiName;
         this.column = column;
+    }
+
+    //a metric of the air sensor: no BTHome object
+    Metric(final String apiName, final String column) {
+        this.source = Source.HTTP;
+        this.objectId = -1;
+        this.index = -1;
+        this.apiName = apiName;
+        this.column = column;
+    }
+
+    public Source source() {
+        return source;
+    }
+
+    //whether weather_reading has its column: the air quality is not stored before HAS-428
+    public boolean isStored() {
+        return source == Source.BTHOME;
     }
 
     public String column() {
@@ -57,7 +87,7 @@ public enum Metric {
         }
         final int idx = index == null ? 0 : index;
         return Arrays.stream(values())
-            .filter(metric -> metric.objectId == objectId && metric.index == idx)
+            .filter(metric -> metric.source == Source.BTHOME && metric.objectId == objectId && metric.index == idx)
             .findFirst();
     }
 
