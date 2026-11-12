@@ -24,6 +24,6 @@ public class WeatherException extends RuntimeException {
     //the names there are, not the one asked for: what a client sent is never echoed into an answer or a log
     public static WeatherException unknownMetric() {
         return new WeatherException(HttpStatus.BAD_REQUEST, WeatherError.UNKNOWN_METRIC, "metric must be one of: "
-            + Arrays.stream(Metric.values()).map(Metric::apiName).collect(Collectors.joining(", ")));
+            + Arrays.stream(Metric.values()).filter(Metric::isStored).map(Metric::apiName).collect(Collectors.joining(", ")));
     }
 }

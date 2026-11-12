@@ -24,6 +24,10 @@ public class WebClientConfig {
     static final Duration MAX_IDLE_TIME = Duration.ofMinutes(2);
     static final Duration MAX_LIFE_TIME = Duration.ofMinutes(30);
 
+    //The air quality sensor on the home network (HAS-427): its address comes from the registry, so no base url
+    static final Duration AIR_SENSOR_CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    static final Duration AIR_SENSOR_RESPONSE_TIMEOUT = Duration.ofSeconds(5);
+
     //Spring infers only close() and shutdown() as destroy methods, so the pools are named explicitly
     @Bean(destroyMethod = "dispose")
     ConnectionProvider databaseConnectionProvider() {
@@ -37,6 +41,19 @@ public class WebClientConfig {
         final InternalServiceProperties properties
     ) {
         return webClient(webClientBuilder, databaseConnectionProvider, properties.database());
+    }
+
+    @Bean(destroyMethod = "dispose")
+    ConnectionProvider airSensorConnectionProvider() {
+        return connectionProvider("air-sensor");
+    }
+
+    @Bean
+    WebClient airSensorWebClient(final WebClient.Builder webClientBuilder, final ConnectionProvider airSensorConnectionProvider) {
+        final HttpClient httpClient = HttpClient.create(airSensorConnectionProvider)
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(AIR_SENSOR_CONNECT_TIMEOUT.toMillis()))
+            .responseTimeout(AIR_SENSOR_RESPONSE_TIMEOUT);
+        return webClientBuilder.clientConnector(new ReactorClientHttpConnector(httpClient)).build();
     }
 
     static ConnectionProvider connectionProvider(final String name) {

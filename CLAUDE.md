@@ -4,7 +4,8 @@ The weather station of the house (epic HAS-233): a Shelly WS90 read locally thro
 gateway, its readings kept and served to the dashboard, the blinds schedules (HAS-247) and the
 overview. Since HAS-236 it takes in the readings of the station and stores them, since HAS-237 it
 reconciles with the gateway every 5 min and alerts on silence, since HAS-238 it serves the read API
-(`/current`, `/status`, `/history`) and deletes readings past the retention.
+(`/current`, `/status`, `/history`) and deletes readings past the retention. Since HAS-427 (epic HAS-423) it
+reads the BleBox airSensor outside the house over HTTP.
 
 Part of the smart-home-automation-system organization — org-wide conventions, the
 repository map and working rules come from the workspace-level context
@@ -23,10 +24,10 @@ the service code) holds everywhere else.
   (HAS-238) is not routed by `api-gateway-service` yet (HAS-239 - GET-only, like the presence
   allowlist). Its callers to come: the dashboard (`UNKNOWN_METRIC` needs a text there), the blinds
   schedules (HAS-247), the overview.
-- Uses libraries: `cholewa-commons` 1.11.0 (pool, error contract, connection names,
+- Uses libraries: `cholewa-commons` 1.14.0 (pool, error contract, connection names,
   `NotificationPublisher`, the required properties, Logbook in the reactive chain, the scheduler pool and
-  `ScheduledPass`), `smart-home-sdk` 1.12.0, `shelly-client`
-  2.1.0 (the decoder, `dynamicComponents` - added to the library for this service in HAS-236).
+  `ScheduledPass`), `smart-home-sdk` 1.20.0 (`DeviceKind.AIR_QUALITY_SENSOR`, `BleboxBinding`), `shelly-client`
+  2.7.0 (the decoder, `dynamicComponents` - added to the library for this service in HAS-236).
 - Database: own database `home-automation-weather`, pool `database.pool.max-size: 2` (heating 2 /
   database 4 / water 2 / presence 2 / blinds 2 / weather 2 = 14 of 22), pinned by
   `WeatherServiceApplicationTest`. `V1__weather_reading.sql`, `V2__station_alert.sql`; the next
@@ -145,6 +146,25 @@ the service code) holds everywhere else.
   Bash), the released image first (`SPRING_PROFILES_ACTIVE=home,local`, the `database-*` variables,
   `flyway-url=...?sslmode=require`, host `host.docker.internal`), then the new jar on the same
   database.
+- **The air quality - an HTTP source next to BTHome** (HAS-427): the BleBox airSensor (registry 145,
+  `deployment-tools/scripts/blebox/devices.md`) is the device of kind `air quality sensor` of the registry,
+  read with every `StationRefresh` (`AirQuality.refresh`, `AirSensorMapper`: the rules of the station - one
+  expected, a second a WARN once, the lowest id; a failed read keeps it; another sensor clears its state).
+  `AirQualityPoll` reads it every minute (`fixedDelay` PT1M, **not configurable**, bounded at 50 s,
+  `Mono.defer` inside `AirQuality.poll`): `AirSensorClient` - `GET http://<address>/api/air/state` on the
+  `airSensorWebClient` of `WebClientConfig` (the injected builder, 5 s connect and response, its own pool),
+  every failure an `AirSensorCallException` with its kind, one WARN an hour per kind; **no command, never
+  `/s/kick`** (it wears the laser). `AirReadings` turns the wire (`AirStateResponse`, types `pm1`,
+  `pm2.5`, `pm10`) into readings: whole µg/m³, measured at the pod's instant minus `elapsedTimeS` (the
+  device has no clock), `state` 3 / `elapsedTimeS` -1 / no value is no reading, the level dated by the
+  newest of the three and none below 1; `trend` and `qualityLevel` are not served. **Held in `AirQuality`,
+  not in `CurrentWeather`**: the station's `heardAt`, link, snapshot and `clear()` are the station's, and
+  the sensor's silence must not move them; the readings follow `CurrentWeather.seed` (the same value later
+  confirms). `Metric` has a `Source` - the four `HTTP` metrics (`pm1`, `pm25`, `pm10`, `airQualityLevel`)
+  have no BTHome object, so `Metric.of` never finds them; **they are not stored before HAS-428**
+  (`isStored`): `WeatherSnapshot` writes nothing for them and the history answers `UNKNOWN_METRIC`.
+  `/status` gains `airSensor {address, reachable, checkedAt, lastReadingAt}`; the watch of the sensor is
+  HAS-429.
 - **The read API** (HAS-238): `WeatherController` -> `CurrentWeatherQuery` (memory) and
   `WeatherHistoryService` (database). The names of the metrics are `Metric.apiName()` and the columns
   `Metric.column()`, both pinned by `MetricTest` - wire contract of the dashboard and the blinds

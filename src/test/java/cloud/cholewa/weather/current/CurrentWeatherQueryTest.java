@@ -1,8 +1,10 @@
 package cloud.cholewa.weather.current;
 
+import cloud.cholewa.weather.air.AirQuality;
 import cloud.cholewa.weather.api.model.CurrentMetric;
 import cloud.cholewa.weather.api.model.StationStatus;
 import cloud.cholewa.weather.config.MonitorProperties;
+import cloud.cholewa.weather.model.AirSensor;
 import cloud.cholewa.weather.model.Metric;
 import cloud.cholewa.weather.model.Reading;
 import cloud.cholewa.weather.model.Station;
@@ -17,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,14 +35,53 @@ class CurrentWeatherQueryTest {
         "shellyplugsg3-28372f2f0460", "10.78.30.36");
 
     private final CurrentWeather currentWeather = new CurrentWeather(CLOCK);
+    private static final AirSensor SENSOR = new AirSensor(145, "Air quality sensor", "10.78.30.23", "aa48fad9faa6");
+
     private final WeatherStation weatherStation = mock(WeatherStation.class);
-    private final CurrentWeatherQuery sut = new CurrentWeatherQuery(currentWeather, weatherStation,
+    private final AirQuality airQuality = mock(AirQuality.class);
+    private final CurrentWeatherQuery sut = new CurrentWeatherQuery(currentWeather, weatherStation, airQuality,
         new MonitorProperties(Duration.ofMinutes(30), Duration.ofHours(1)), CLOCK);
 
     @BeforeEach
     void setUp() {
         when(weatherStation.station()).thenReturn(Optional.of(STATION));
         when(weatherStation.lastCheck()).thenReturn(Optional.empty());
+        when(airQuality.confirmedReadings()).thenReturn(Map.of());
+        when(airQuality.sensor()).thenReturn(Optional.empty());
+    }
+
+    //HAS-427: the air quality stands beside the station, in the order of Metric, with the rules of every metric
+    @Test
+    void should_answer_the_air_quality_beside_the_station() {
+        currentWeather.observe(Metric.TEMPERATURE, Reading.number(new BigDecimal("8.4"), NOW.minusSeconds(40)));
+        when(airQuality.confirmedReadings()).thenReturn(Map.of(
+            Metric.PM10, Reading.number(new BigDecimal("12"), NOW.minus(Duration.ofMinutes(6))),
+            Metric.AIR_QUALITY_LEVEL, Reading.number(new BigDecimal("1"), NOW.minus(Duration.ofMinutes(31)))));
+
+        assertThat(sut.current()).containsExactly(
+            Map.entry("temperature", new CurrentMetric(new BigDecimal("8.4"), LocalDateTime.of(2026, 10, 16, 13, 59, 20), false)),
+            Map.entry("pm10", new CurrentMetric(new BigDecimal("12"), LocalDateTime.of(2026, 10, 16, 13, 54, 0), false)),
+            Map.entry("airQualityLevel", new CurrentMetric(new BigDecimal("1"), LocalDateTime.of(2026, 10, 16, 13, 29, 0), true)));
+    }
+
+    @Test
+    void should_answer_the_status_of_the_air_sensor() {
+        when(airQuality.sensor()).thenReturn(Optional.of(SENSOR));
+        when(airQuality.lastCheck()).thenReturn(Optional.of(new AirQuality.Check(SENSOR, NOW.minusSeconds(30), true)));
+        when(airQuality.lastReadingAt()).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(6))));
+
+        assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", true,
+            LocalDateTime.of(2026, 10, 16, 13, 59, 30), LocalDateTime.of(2026, 10, 16, 13, 54, 0)));
+    }
+
+    //before the first read of the sensor only its address is known
+    @Test
+    void should_leave_out_what_is_not_known_of_the_air_sensor() {
+        when(airQuality.sensor()).thenReturn(Optional.of(SENSOR));
+        when(airQuality.lastCheck()).thenReturn(Optional.empty());
+        when(airQuality.lastReadingAt()).thenReturn(Optional.empty());
+
+        assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", null, null, null));
     }
 
     @Test
@@ -84,7 +126,7 @@ class CurrentWeatherQueryTest {
 
         assertThat(sut.status()).isEqualTo(new StationStatus(
             new StationStatus.Gateway("shellyplugsg3-28372f2f0460", true, LocalDateTime.of(2026, 10, 16, 13, 58, 55)),
-            LocalDateTime.of(2026, 10, 16, 13, 59, 40), false));
+            LocalDateTime.of(2026, 10, 16, 13, 59, 40), false, null));
     }
 
     @Test
@@ -102,9 +144,9 @@ class CurrentWeatherQueryTest {
     @Test
     void should_leave_out_what_is_not_known_yet() {
         assertThat(sut.status()).isEqualTo(new StationStatus(
-            new StationStatus.Gateway("shellyplugsg3-28372f2f0460", null, null), null, true));
+            new StationStatus.Gateway("shellyplugsg3-28372f2f0460", null, null), null, true, null));
 
         when(weatherStation.station()).thenReturn(Optional.empty());
-        assertThat(sut.status()).isEqualTo(new StationStatus(null, null, true));
+        assertThat(sut.status()).isEqualTo(new StationStatus(null, null, true, null));
     }
 }

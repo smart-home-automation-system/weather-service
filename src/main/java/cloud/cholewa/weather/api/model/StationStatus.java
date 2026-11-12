@@ -12,10 +12,11 @@ import java.time.LocalDateTime;
  * {@code silent} - nothing heard for {@code weather.monitor.silent-after}, the threshold of the
  * alerts; true as well when nothing was heard since the start - the alert about that waits for the
  * threshold, counted from the start of the watch, so the status may show silence before the household
- * is told.
+ * is told.<br>
+ * {@code airSensor} - the air quality sensor (HAS-427); absent while the registry has none.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record StationStatus(Gateway gateway, LocalDateTime lastReadingAt, boolean silent) {
+public record StationStatus(Gateway gateway, LocalDateTime lastReadingAt, boolean silent, AirSensor airSensor) {
 
     /**
      * {@code deviceId} - the id the gateway publishes under.<br>
@@ -25,5 +26,15 @@ public record StationStatus(Gateway gateway, LocalDateTime lastReadingAt, boolea
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record Gateway(String deviceId, Boolean reachable, LocalDateTime checkedAt) {
+    }
+
+    /**
+     * {@code address} - where the sensor is read.<br>
+     * {@code reachable} - whether the last read answered with its state; absent before the first read.<br>
+     * {@code checkedAt} - when that read was made (house time); absent before it.<br>
+     * {@code lastReadingAt} - the newest time the sensor measured (house time); absent until it has.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record AirSensor(String address, Boolean reachable, LocalDateTime checkedAt, LocalDateTime lastReadingAt) {
     }
 }

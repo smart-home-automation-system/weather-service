@@ -41,7 +41,18 @@ class MetricTest {
     void should_keep_the_names_of_the_read_api() {
         assertThat(Metric.values()).extracting(Metric::apiName).containsExactly(
             "battery", "pressure", "illuminance", "dewPoint", "voltage", "raining", "humidity", "wind", "gust",
-            "temperature", "uv", "windDirection", "precipitation");
+            "temperature", "uv", "windDirection", "precipitation", "pm1", "pm25", "pm10", "airQualityLevel");
+    }
+
+    //HAS-427: the air quality comes over HTTP - no BTHome object finds it, and it is not stored before HAS-428
+    @Test
+    void should_keep_the_air_quality_apart_from_the_objects_of_the_station() {
+        assertThat(Metric.values()).filteredOn(metric -> metric.source() == Metric.Source.HTTP)
+            .containsExactly(Metric.PM1, Metric.PM25, Metric.PM10, Metric.AIR_QUALITY_LEVEL)
+            .noneMatch(Metric::isStored);
+        assertThat(Metric.of(-1, -1)).isEmpty();
+        assertThat(Metric.values()).filteredOn(metric -> metric.source() == Metric.Source.BTHOME).allMatch(Metric::isStored);
+        assertThat(Metric.values()).extracting(Metric::column).contains("pm1", "pm25", "pm10", "air_quality_level");
     }
 
     //the history reads the column of each metric: every one has its own
@@ -52,7 +63,7 @@ class MetricTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"dewPoint, DEW_POINT", "raining, RAIN", "windDirection, WIND_DIRECTION"})
+    @CsvSource({"dewPoint, DEW_POINT", "raining, RAIN", "windDirection, WIND_DIRECTION", "pm25, PM25", "airQualityLevel, AIR_QUALITY_LEVEL"})
     void should_find_a_metric_by_its_api_name(final String name, final Metric metric) {
         assertThat(Metric.ofApiName(name)).contains(metric);
     }

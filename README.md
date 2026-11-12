@@ -34,7 +34,8 @@ readings over MQTT.
 
 Since HAS-236 the service **takes in the readings and stores them**, since HAS-237 it **reconciles
 with the gateway and tells the household when the station goes silent**, since HAS-238 it **serves
-the current weather, the status of the station and the history** (reads only).
+the current weather, the status of the station and the history** (reads only), and since HAS-427 it
+**reads the air quality outside the house** - a BleBox airSensor polled over HTTP.
 
 Everything is non-blocking (Spring WebFlux / Reactor):
 
@@ -62,6 +63,18 @@ Everything is non-blocking (Spring WebFlux / Reactor):
   same reading again or an older one changes nothing. A sensor of another Bluetooth device on the
   gateway is ignored without a word, one the map does not have is a WARN (once per map).
   `<gateway>.status.bthomedevice:<id>` gives the signal and the battery of the station.
+- **The air quality sensor** (HAS-427, epic HAS-423) is the switched-on device of kind
+  `air quality sensor` of the registry (its BleBox binding: the address and the id of `GET /info`), read
+  with every refresh of the station - one is expected, a second is a WARN once and the lowest id is
+  taken, a failed read keeps the last one, another sensor clears what the last one measured. The
+  sensor pushes nothing, so the service reads `GET http://<address>/api/air/state` **every minute**
+  (not configurable, 5 s response timeout; `/s/kick` - a measurement at once - is never sent, it
+  shortens the life of the laser). PM1, PM2.5 and PM10 in µg/m³ and the level of the air: the device
+  has no clock, so a reading is measured at the time of the read minus its `elapsedTimeS`; a sensor in
+  error (`state` 3), without a measurement (`elapsedTimeS` -1) or without a value is no reading; the
+  same value read again confirms it. Held in memory apart from the station (its silence is not the
+  station's); stored from HAS-428. A failed read keeps the readings and is one WARN an hour per kind
+  of failure.
 - **Once a minute** the state becomes a row of `weather_reading` - only when something changed since
   the last row; each row is logged at INFO. At the start the state is restored from the latest row
   before anything is stored, and when the pod stops the state is stored once more. **Every night at
@@ -111,7 +124,7 @@ date-time is house time without an offset.
 | Method | Path | What |
 |---|---|---|
 | GET | `/current` | per metric `{value, measuredAt, stale}` |
-| GET | `/status` | `gateway {deviceId, reachable, checkedAt}`, `lastReadingAt`, `silent` |
+| GET | `/status` | `gateway {deviceId, reachable, checkedAt}`, `lastReadingAt`, `silent`, `airSensor {address, reachable, checkedAt, lastReadingAt}` (HAS-427) |
 | GET | `/history?metric=&from=&to=` | one metric over a range: `metric`, `from`, `to`, `bucketSeconds`, `points: [{at, avg, min, max}]` |
 
 **Metrics** (the names of `/current` and of `metric`; the unit is the one the gateway reports):
@@ -131,6 +144,10 @@ date-time is house time without an offset.
 | `precipitation` | **not confirmed** | the running total of the station as the gateway reports it (4311 in October 2026); compare with the app on the first rain. History: `max - min` of a bucket is its rain |
 | `battery` | % | |
 | `voltage` | V | |
+| `pm1` | µg/m³ | the air quality sensor (HAS-427), a whole number; no history before HAS-428 |
+| `pm25` | µg/m³ | PM2.5, the same |
+| `pm10` | µg/m³ | PM10, the same |
+| `airQualityLevel` | 1 - 6 | the level the sensor gives (the GIOS scale, 1 very good ... 6 very bad), measured with the newest of the three |
 
 - `/current`: a metric never received is missing - never `null` or zero; `{}` before the first
   reading. `measuredAt` is the newest time the station is known to have had the value (a value that
@@ -138,7 +155,8 @@ date-time is house time without an offset.
   than `weather.monitor.silent-after` (30 min), the threshold of the alerts.
 - `/status`: what is not known yet is left out (`gateway` without a station in the registry,
   `reachable` / `checkedAt` before the first read of the gateway, `lastReadingAt` before anything
-  was heard). `silent` is true when nothing was heard for 30 min - or at all since the start, while
+  was heard; `airSensor` without a sensor in the registry, its `reachable` / `checkedAt` before its first
+  read, its `lastReadingAt` before it measured). `silent` - of the station alone - is true when nothing was heard for 30 min - or at all since the start, while
   the alert waits for the threshold.
 - `/history`: the rules of the hot-water history of water-service. `from` and `to` are local
   date-times without an offset (`2026-10-16T00:00:00`), `from` before `to`, the start included
@@ -146,7 +164,7 @@ date-time is house time without an offset.
   **buckets** are chosen by the service and named in `bucketSeconds`: **5 min** for up to 2 days,
   **30 min** up to 8 days, **2 h** beyond, aligned to the clock of the house; a bucket without a
   reading has no point. `avg` is rounded to 2 decimals. A `metric` outside the list is a 400 with
-  the code `UNKNOWN_METRIC`. One range is queried at a time, each cut off after 10 s. The night the
+  the code `UNKNOWN_METRIC` - so are the four of the air quality until HAS-428 stores them. One range is queried at a time, each cut off after 10 s. The night the
   summer time begins has a gap of an hour, the night it ends puts the repeated hour into the same
   buckets.
 

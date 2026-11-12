@@ -86,7 +86,8 @@ class WeatherControllerTest {
     @Test
     void should_answer_the_status_of_the_station() {
         when(currentWeatherQuery.status()).thenReturn(new StationStatus(
-            new StationStatus.Gateway("shellyplugsg3-28372f2f0460", true, AT), AT.minusSeconds(20), false));
+            new StationStatus.Gateway("shellyplugsg3-28372f2f0460", true, AT), AT.minusSeconds(20), false,
+            new StationStatus.AirSensor("10.78.30.23", true, AT, AT.minusMinutes(6))));
 
         webTestClient.get().uri("/status")
             .exchange()
@@ -96,7 +97,9 @@ class WeatherControllerTest {
                     {
                       "gateway": {"deviceId": "shellyplugsg3-28372f2f0460", "reachable": true, "checkedAt": "2026-10-16T12:43:35"},
                       "lastReadingAt": "2026-10-16T12:43:15",
-                      "silent": false
+                      "silent": false,
+                      "airSensor": {"address": "10.78.30.23", "reachable": true, "checkedAt": "2026-10-16T12:43:35",
+                        "lastReadingAt": "2026-10-16T12:37:35"}
                     }
                     """, JsonCompareMode.STRICT
             );
@@ -106,21 +109,22 @@ class WeatherControllerTest {
     @Test
     void should_leave_out_what_is_not_known_in_the_status() {
         when(currentWeatherQuery.status()).thenReturn(new StationStatus(
-            new StationStatus.Gateway("shellyplugsg3-28372f2f0460", null, null), null, true));
+            new StationStatus.Gateway("shellyplugsg3-28372f2f0460", null, null), null, true,
+            new StationStatus.AirSensor("10.78.30.23", null, null, null)));
 
         webTestClient.get().uri("/status")
             .exchange()
             .expectStatus().isOk()
             .expectBody().json(
                 """
-                    {"gateway": {"deviceId": "shellyplugsg3-28372f2f0460"}, "silent": true}
+                    {"gateway": {"deviceId": "shellyplugsg3-28372f2f0460"}, "silent": true, "airSensor": {"address": "10.78.30.23"}}
                     """, JsonCompareMode.STRICT
             );
     }
 
     @Test
     void should_leave_out_the_gateway_without_a_station() {
-        when(currentWeatherQuery.status()).thenReturn(new StationStatus(null, null, true));
+        when(currentWeatherQuery.status()).thenReturn(new StationStatus(null, null, true, null));
 
         webTestClient.get().uri("/status")
             .exchange()

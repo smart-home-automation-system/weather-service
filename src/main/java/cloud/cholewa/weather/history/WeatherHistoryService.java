@@ -26,13 +26,13 @@ public class WeatherHistoryService {
 
     /**
      * The stored readings of one metric from {@code from} up to, not including, {@code to}, in buckets
-     * whose width follows from the length of the range. A name that is no metric of the read API is a
-     * 400 with the code UNKNOWN_METRIC, a range that breaks a rule a 400 without one. A range without
+     * whose width follows from the length of the range. A name that is no stored metric of the read API is a
+     * 400 with the code UNKNOWN_METRIC (the air quality is not stored before HAS-428), a range that breaks a rule a 400 without one. A range without
      * a reading is answered with no points. One range at a time.
      */
     public Mono<WeatherHistoryReply> queryHistory(final String metricName, final LocalDateTime from, final LocalDateTime to) {
         return Mono.defer(() -> {
-            final Metric metric = Metric.ofApiName(metricName).orElse(null);
+            final Metric metric = Metric.ofApiName(metricName).filter(Metric::isStored).orElse(null);
             if (metric == null) {
                 return Mono.error(WeatherException.unknownMetric());
             }

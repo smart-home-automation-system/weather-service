@@ -1,6 +1,7 @@
 package cloud.cholewa.weather.station;
 
 import cloud.cholewa.commons.scheduling.ScheduledPass;
+import cloud.cholewa.weather.air.AirQuality;
 import cloud.cholewa.weather.monitor.StationWatch;
 import lombok.RequiredArgsConstructor;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -9,8 +10,8 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 
-//The registry and the gateway read at the start and every five minutes, then the watch over the
-//station judges what the read showed. Spring subscribes again to the same Mono for every run, which is
+//The registry and the gateway read at the start and every five minutes, then the air quality sensor of the
+//registry (HAS-427), then the watch over the station judges what the read showed. Spring subscribes again to the same Mono for every run, which is
 //why both are deferred inside. fixedDelay: the next pass waits for the last one to end. Neither part
 //signals an error. Scheduling is off under the test profile
 @Component
@@ -22,11 +23,12 @@ public class StationRefresh {
     static final Duration LIMIT = Duration.ofMinutes(4);
 
     private final WeatherStation weatherStation;
+    private final AirQuality airQuality;
     private final StationWatch stationWatch;
 
     @Scheduled(initialDelayString = "PT0S", fixedDelayString = "PT5M")
     Mono<Void> refresh() {
         return ScheduledPass.bounded("weather station refresh", LIMIT,
-            () -> weatherStation.refresh().then(stationWatch.check()));
+            () -> weatherStation.refresh().then(airQuality.refresh()).then(stationWatch.check()));
     }
 }
