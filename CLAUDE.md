@@ -184,7 +184,9 @@ the service code) holds everywhere else.
     - it would otherwise close it as "an alert of another station". `silent()` is the field of `/status`.
   - `SmogWatch`: a hysteresis on the level (>= smog-level opens, <= clear-level closes, between holds), each held
     `smogAfter` **by the times the sensor measured**, never by the clock - a sensor silent on a bad level opens
-    nothing. One `smog warning` at the start (occurredAt = the start of the bad hold, the particles of the reading
+    nothing; a gap in the measurements longer than `silentAfter` (a silent sensor, the row restored after a restart)
+    starts both holds anew - **never `smogAfter`**: the sensor measures every 6-7 min, and 0.7.0 compared with `smogAfter`,
+    so a hold below that cycle (5 min is allowed) never opened (found on the dev queues, fixed in 0.7.1). One `smog warning` at the start (occurredAt = the start of the bad hold, the particles of the reading
     that met it), one `smog over` at the end, no reminders, **no SMS** (owner, 2026-11-12) -
     `NotificationPublisher.publishHousehold(json)` of a `HouseholdNotification` (SDK 1.21.0, the injected Jackson 3
     `JsonMapper`). Notification first, row after (`air_quality_alert`, V4; the peaks raised while open, written only

@@ -68,13 +68,17 @@ class SmogWatchTest {
 
     //the sensor measured this level with these particles minutes after the start; the pass runs then
     private void measured(final int level, final int pm10, final int pm25, final long minutes) {
+        measuredBy(sut, level, pm10, pm25, minutes);
+    }
+
+    private void measuredBy(final SmogWatch watch, final int level, final int pm10, final int pm25, final long minutes) {
         final Instant at = START.plus(Duration.ofMinutes(minutes));
         clock.move(Duration.between(clock.instant(), at.plusSeconds(20)));
         readings.set(Map.of(
             Metric.AIR_QUALITY_LEVEL, Reading.number(BigDecimal.valueOf(level), at),
             Metric.PM10, Reading.number(BigDecimal.valueOf(pm10), at),
             Metric.PM25, Reading.number(BigDecimal.valueOf(pm25), at)));
-        sut.check().as(StepVerifier::create).verifyComplete();
+        watch.check().as(StepVerifier::create).verifyComplete();
     }
 
     //bad air held for half an hour opens an episode with one household message, the particles of the reading
@@ -181,7 +185,7 @@ class SmogWatchTest {
         assertThat(published).isEmpty();
     }
 
-    //a gap in the measurements longer than the hold - the row restored after a restart, a silent sensor - is no
+    //a gap in the measurements longer than silent-after - the row restored after a restart, a silent sensor - is no
     //hold: a bad level before and after it opens nothing until it held again
     @Test
     void should_start_the_hold_anew_after_a_gap_in_the_measurements() {
@@ -190,6 +194,19 @@ class SmogWatchTest {
         assertThat(published).isEmpty();
 
         measured(5, 105, 70, 150);
+
+        assertThat(published).hasSize(1);
+    }
+
+    //the sensor measures every 6-7 minutes: a smog-after shorter than that (5 min is allowed) still opens an episode -
+    //the gap is judged by silent-after, never by smog-after (found on the dev queues, 2026-11-12)
+    @Test
+    void should_open_an_episode_with_a_hold_shorter_than_the_measuring_cycle_of_the_sensor() {
+        final SmogWatch quick = new SmogWatch(airQuality, repository, publisher, JsonMapper.builder().build(),
+            new AirProperties(Duration.ofMinutes(30), 5, 3, Duration.ofMinutes(5)), clock);
+
+        measuredBy(quick, 5, 105, 70, 0);
+        measuredBy(quick, 5, 110, 75, 7);
 
         assertThat(published).hasSize(1);
     }

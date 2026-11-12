@@ -55,7 +55,7 @@ public class SmogWatch {
     //since when the level has been at the smog level / at the clear level without a break - by the sensor's times
     private final AtomicReference<Instant> badSince = new AtomicReference<>();
     private final AtomicReference<Instant> clearSince = new AtomicReference<>();
-    //the time of the level last judged - a gap longer than smog-after breaks both holds
+    //the time of the level last judged - a gap longer than silent-after breaks both holds
     private final AtomicReference<Instant> lastLevelAt = new AtomicReference<>();
     //the open episode as last read or written - what the read API shows
     private final AtomicReference<AirQualityAlertEntity> open = new AtomicReference<>();
@@ -138,11 +138,13 @@ public class SmogWatch {
     }
 
     //the level read now: at the smog level it keeps (or starts) the bad hold, at the clear level the clear one;
-    //between the two neither holds. A gap in the measurements longer than smog-after - a silent sensor, the reading
-    //of the latest row restored after a restart - is no hold: both start anew from this reading
+    //between the two neither holds. A gap in the measurements longer than silent-after - a silent sensor, the reading
+    //of the latest row restored after a restart - is no hold: both start anew from this reading. Never smog-after: the
+    //sensor measures every 6-7 minutes, and a smog-after below that (5 min is allowed) took every new measurement for a
+    //gap - no episode ever opened (found on the dev queues, 2026-11-12)
     private void hold(final int value, final Instant at) {
         final Instant last = lastLevelAt.getAndSet(at);
-        if (last != null && at.isAfter(last.plus(properties.smogAfter()))) {
+        if (last != null && at.isAfter(last.plus(properties.silentAfter()))) {
             badSince.set(null);
             clearSince.set(null);
         }
