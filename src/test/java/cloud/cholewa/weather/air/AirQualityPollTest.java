@@ -24,7 +24,8 @@ class AirQualityPollTest {
         final Scheduled scheduled = AirQualityPoll.class.getDeclaredMethod("poll").getAnnotation(Scheduled.class);
 
         assertThat(Duration.parse(scheduled.fixedDelayString())).isEqualTo(Duration.ofMinutes(1));
-        assertThat(AirQualityPoll.LIMIT.compareTo(Duration.ofMinutes(1))).isNegative();
+        final Duration bound = AirQualityPoll.LIMIT;
+        assertThat(bound).isLessThan(Duration.ofMinutes(1));
     }
 
     //HAS-304: a read hung on a dead connection ends at its bound
