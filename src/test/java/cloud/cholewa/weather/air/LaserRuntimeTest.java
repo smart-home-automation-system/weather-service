@@ -231,7 +231,7 @@ class LaserRuntimeTest {
         when(publisher.publishReminder(anyString())).thenReturn(Mono.never());
         when(client.runtimeHours(SENSOR.address())).thenReturn(Mono.just(7000L));
 
-        StepVerifier.withVirtualTime(() -> sut.check())
+        StepVerifier.withVirtualTime(sut::check)
             .expectSubscription()
             .thenAwait(LaserRuntime.PUBLISH_TIMEOUT)
             .verifyComplete();

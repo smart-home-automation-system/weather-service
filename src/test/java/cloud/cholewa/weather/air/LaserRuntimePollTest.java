@@ -24,7 +24,8 @@ class LaserRuntimePollTest {
         final Scheduled scheduled = LaserRuntimePoll.class.getDeclaredMethod("poll").getAnnotation(Scheduled.class);
 
         assertThat(Duration.parse(scheduled.fixedDelayString())).isEqualTo(Duration.ofMinutes(5));
-        assertThat(LaserRuntimePoll.LIMIT).isLessThan(Duration.ofMinutes(1));
+        final Duration bound = LaserRuntimePoll.LIMIT;
+        assertThat(bound).isLessThan(Duration.ofMinutes(1));
     }
 
     //HAS-304: a read hung on a dead connection ends at its bound
