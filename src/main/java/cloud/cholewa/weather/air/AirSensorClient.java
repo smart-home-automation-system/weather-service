@@ -13,8 +13,9 @@ import reactor.core.publisher.Mono;
 import java.net.ConnectException;
 import java.util.concurrent.TimeoutException;
 
-//The one call of the air sensor (HAS-427): GET http://<address>/api/air/state - a read, nothing else. No
-//command is ever sent: /s/kick (a measurement at once) shortens the life of the laser.
+//The reads of the air sensor: GET http://<address>/api/air/state (HAS-427) and, once an hour, GET /api/air/runtime -
+//the hours the laser has run (HAS-437). Reads, nothing else. No command is ever sent: /s/kick (a measurement at
+//once) shortens the life of the laser.
 //Every failure is an AirSensorCallException with its kind - the sensor away, a timeout, an error status,
 //a body that is not the model ({} included); AirQuality logs one WARN an hour per kind. The WebClient is
 //the airSensorWebClient of WebClientConfig: built from the injected builder (traced by Logbook), with a
@@ -29,18 +30,32 @@ public class AirSensorClient {
     }
 
     public Mono<AirStateResponse> state(final String address) {
-        return airSensorWebClient
-            .get()
-            .uri(UriComponentsBuilder.fromUriString("http://" + address).pathSegment("api", "air", "state").build().toUri())
-            .retrieve()
-            .onStatus(HttpStatusCode::isError, response -> response.releaseBody()
-                .then(Mono.error(() -> new AirSensorCallException(AirSensorCallException.Kind.STATUS,
-                    "the air sensor answered " + response.statusCode().value()))))
-            .bodyToMono(AirStateResponse.class)
+        return read(address, "state", AirStateResponse.class)
             .filter(state -> state.air() != null)
             .switchIfEmpty(Mono.error(() -> new AirSensorCallException(AirSensorCallException.Kind.INVALID_BODY,
                 "the air sensor answered without the state of the air")))
             .onErrorMap(error -> !(error instanceof AirSensorCallException), AirSensorClient::mapped);
+    }
+
+    //the hours the laser has run - a whole number from 0 up; anything else ({}, a fraction, a negative, a text) is a
+    //failed read of the kind INVALID_BODY
+    public Mono<Long> runtimeHours(final String address) {
+        return read(address, "runtime", AirRuntimeResponse.class)
+            .flatMap(runtime -> Mono.justOrEmpty(runtime.hours()))
+            .switchIfEmpty(Mono.error(() -> new AirSensorCallException(AirSensorCallException.Kind.INVALID_BODY,
+                "the air sensor answered without the whole hours of its laser")))
+            .onErrorMap(error -> !(error instanceof AirSensorCallException), AirSensorClient::mapped);
+    }
+
+    private <T> Mono<T> read(final String address, final String resource, final Class<T> type) {
+        return airSensorWebClient
+            .get()
+            .uri(UriComponentsBuilder.fromUriString("http://" + address).pathSegment("api", "air", resource).build().toUri())
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, response -> response.releaseBody()
+                .then(Mono.error(() -> new AirSensorCallException(AirSensorCallException.Kind.STATUS,
+                    "the air sensor answered " + response.statusCode().value()))))
+            .bodyToMono(type);
     }
 
     //the cause decides the kind; the text of a body is never quoted

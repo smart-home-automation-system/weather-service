@@ -26,13 +26,14 @@ the service code) holds everywhere else.
   schedules (HAS-247), the overview.
 - Uses libraries: `cholewa-commons` 1.14.0 (pool, error contract, connection names,
   `NotificationPublisher`, the required properties, Logbook in the reactive chain, the scheduler pool and
-  `ScheduledPass`), `smart-home-sdk` 1.20.0 (`DeviceKind.AIR_QUALITY_SENSOR`, `BleboxBinding`), `shelly-client`
+  `ScheduledPass`), `smart-home-sdk` 1.21.0 (`DeviceKind.AIR_QUALITY_SENSOR`, `BleboxBinding`, the smog events), `shelly-client`
   2.7.0 (the decoder, `dynamicComponents` - added to the library for this service in HAS-236).
 - Database: own database `home-automation-weather`, pool `database.pool.max-size: 2` (heating 2 /
   database 4 / water 2 / presence 2 / blinds 2 / weather 2 = 14 of 22), pinned by
   `WeatherServiceApplicationTest`. `V1__weather_reading.sql`, `V2__station_alert.sql`, `V3__air_quality.sql`
   (HAS-428: `pm1`, `pm25`, `pm10`, `air_quality_level` on `weather_reading`, SMALLINT, nullable),
-  `V4__air_quality_alert.sql` (HAS-429: the episodes of smog, one open at a time); the next migration is V5.
+  `V4__air_quality_alert.sql` (HAS-429: the episodes of smog, one open at a time), `V5__air_sensor_runtime.sql`
+  (HAS-437: the hours of the laser, one row per sensor); the next migration is V6.
 - Integrates with hardware: the WS90 (`08:b9:5f:d1:e6:71`, registry id 55) through the Plug S Gen3
   TREADMILL (registry id 54), paired in HAS-234 - the notes, the sensor ids and how to re-pair are in
   `deployment-tools/scripts/shelly/devices.md`. Every device runs with `enable_rpc: false`, so only
@@ -193,6 +194,19 @@ the service code) holds everywhere else.
     when they rise); a restart goes on with the open episode, never a second message; an open episode of another
     sensor is closed without a word. The holds are in memory - a restart starts them anew. `openEpisode()` is the
     `smog {since, level}` of `/status`.
+  - `LaserRuntime` (HAS-437), its own pass `LaserRuntimePoll` (`fixedDelay` PT5M, first after PT2M, bounded at 50 s; the sensor asked
+    once an hour - `READ_EVERY`, **not configurable**, a failed read too - so a start whose first read of the registry failed
+    waits for the next refresh, not an hour) - never in the minute of `AirQualityPoll`: `AirSensorClient.runtimeHours` - `GET /api/air/runtime`,
+    `{runtime: {timeH}}` (`AirRuntimeResponse`, read as a `BigDecimal` so that a fraction is refused, never cut;
+    `{}`, a negative, a text are `INVALID_BODY`), a failed read one WARN a pass and the last value kept. `LaserProperties`
+    (`weather.air.laser.*`: `lifeHours` 8000, `warnAtHours` 7000, warn below life - `@AssertTrue`, `LaserPropertiesTest`).
+    The counter in memory with the time of its read; the row of the sensor in `air_sensor_runtime` (V5, unique
+    `sensor_id`) written on a change only (the hours or `warned_at_hours`) and read back by the first pass for a sensor
+    (a start, another sensor of the registry). A warning (`publishReminder`, level warn) at the threshold and every
+    `WARN_EVERY_HOURS` (500) more - a first read above it is one warning of the step reached; a counter lower than the
+    last one is one info (a replaced or reset sensor) and clears the step. Notification first, row and memory after
+    (cut off at 20 s, one ERROR, told again next hour). `laser {hours, readAt, lifeHours, warn}` of `/status` -
+    left out until the first read or restore, never of another sensor.
   - **Deploy order**: notification-service reads `smog warning` / `smog over` only from HAS-430 (SDK 1.21.0) - it must
     run first, or a smog message of this service fails its read there.
 - **The read API** (HAS-238): `WeatherController` -> `CurrentWeatherQuery` (memory) and

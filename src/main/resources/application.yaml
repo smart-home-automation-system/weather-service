@@ -119,6 +119,11 @@ weather:
     smog-level: 5
     clear-level: 3
     smog-after: 30m
+    # the laser of the sensor (HAS-437): its run time is read once an hour; at warn-at-hours, and every 500 h more,
+    # the technical channel is told to order a new sensor - BleBox gives the measuring system about life-hours
+    laser:
+      life-hours: 8000
+      warn-at-hours: 7000
   # how long the rows of weather_reading are kept, deleted every night at 03:10; a bare number is days
   retention: 730d
 

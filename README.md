@@ -91,6 +91,14 @@ Everything is non-blocking (Spring WebFlux / Reactor):
   `HouseholdNotification` of smart-home-sdk 1.21.0 through the `household` category, worded by
   notification-service (which must read the two events first - HAS-430). The episodes are rows of
   `air_quality_alert` (V4), so a restart goes on with the open one.
+- **The laser of the air quality sensor** (HAS-437): `GET /api/air/runtime` once an hour (not configurable) -
+  the hours the laser has run, a whole number from 0 up (anything else is a failed read, a WARN, the last value
+  kept). BleBox gives the measuring system about `weather.air.laser.life-hours` (8000; 1000 - 100 000); at
+  `weather.air.laser.warn-at-hours` (7000; 500 - 100 000, below the life) the technical channel is told to order
+  a new sensor (level `warn`), again every 500 h more; a counter that drops (a replaced or reset sensor) is one
+  info, and the warnings start anew. Never the household, never an SMS. The counter and the step of the last
+  warning are the row of the sensor in `air_sensor_runtime` (V5), written on a change only, so a restart neither
+  forgets the counter nor repeats a warning.
 - **The watch over the station** (HAS-237), after every refresh: no reading from the station for
   `weather.monitor.silent-after` (default 30 min, 10 min - 24 h) is an **alert** (level `error`),
   repeated as a **reminder** (`warn`) every `weather.monitor.reminder-interval` (default 1 h,
@@ -135,7 +143,7 @@ date-time is house time without an offset.
 | Method | Path | What |
 |---|---|---|
 | GET | `/current` | per metric `{value, measuredAt, stale}` |
-| GET | `/status` | `gateway {deviceId, reachable, checkedAt}`, `lastReadingAt`, `silent`, `airSensor {address, reachable, checkedAt, lastReadingAt, silent, smog {since, level}}` (HAS-427, HAS-429) |
+| GET | `/status` | `gateway {deviceId, reachable, checkedAt}`, `lastReadingAt`, `silent`, `airSensor {address, reachable, checkedAt, lastReadingAt, silent, smog {since, level}, laser {hours, readAt, lifeHours, warn}}` (HAS-427, HAS-429, HAS-437) |
 | GET | `/history?metric=&from=&to=` | one metric over a range: `metric`, `from`, `to`, `bucketSeconds`, `points: [{at, avg, min, max}]` |
 
 **Metrics** (the names of `/current` and of `metric`; the unit is the one the gateway reports):
@@ -167,7 +175,8 @@ date-time is house time without an offset.
 - `/status`: what is not known yet is left out (`gateway` without a station in the registry,
   `reachable` / `checkedAt` before the first read of the gateway, `lastReadingAt` before anything
   was heard; `airSensor` without a sensor in the registry, its `reachable` / `checkedAt` before its first
-  read, its `lastReadingAt` before it measured). `silent` - of the station alone - is true when nothing was heard for 30 min - or at all since the start, while
+  read, its `lastReadingAt` before it measured, its `laser` before the counter was first read - or brought back
+  from its row). `laser.warn` is true from `weather.air.laser.warn-at-hours`. `silent` - of the station alone - is true when nothing was heard for 30 min - or at all since the start, while
   the alert waits for the threshold.
 - `/history`: the rules of the hot-water history of water-service. `from` and `to` are local
   date-times without an offset (`2026-10-16T00:00:00`), `from` before `to`, the start included
@@ -197,6 +206,9 @@ date-time is house time without an offset.
 - `V4__air_quality_alert.sql` (HAS-429) - `air_quality_alert`: the episodes of smog - the sensor (its registry
   id), `since`, `ended_at` (empty while open), the highest `level` and `peak_pm10` / `peak_pm25`; one open at a
   time (a partial unique index), the ended ones kept as history (`timestamptz`).
+- `V5__air_sensor_runtime.sql` (HAS-437) - `air_sensor_runtime`: the hours the laser of a sensor has run, one
+  row per sensor (its registry id, unique), `read_at` the read that changed it, `warned_at_hours` the step of the
+  last warning to order a new sensor (empty before the first); written on a change only (`timestamptz`).
 - `V2__station_alert.sql` - `station_alert`: the alerts of the watch that are open now, one row per
   watch (`STATION`, `GATEWAY`, `AIR_SENSOR` since HAS-429 - the id of the air quality sensor then) with the id of the station in the registry, since when and when the
   household was last told (`timestamptz`); removed when it is over. An alert about a station the
