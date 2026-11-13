@@ -2,6 +2,7 @@ package cloud.cholewa.weather.current;
 
 import cloud.cholewa.weather.air.AirQuality;
 import cloud.cholewa.weather.air.AirSensorWatch;
+import cloud.cholewa.weather.air.LaserRuntime;
 import cloud.cholewa.weather.air.SmogWatch;
 import cloud.cholewa.weather.api.model.CurrentMetric;
 import cloud.cholewa.weather.api.model.StationStatus;
@@ -44,8 +45,9 @@ class CurrentWeatherQueryTest {
     private final AirQuality airQuality = mock(AirQuality.class);
     private final AirSensorWatch airSensorWatch = mock(AirSensorWatch.class);
     private final SmogWatch smogWatch = mock(SmogWatch.class);
+    private final LaserRuntime laserRuntime = mock(LaserRuntime.class);
     private final CurrentWeatherQuery sut = new CurrentWeatherQuery(currentWeather, weatherStation, airQuality, airSensorWatch, smogWatch,
-        new MonitorProperties(Duration.ofMinutes(30), Duration.ofHours(1)), CLOCK);
+        laserRuntime, new MonitorProperties(Duration.ofMinutes(30), Duration.ofHours(1)), CLOCK);
 
     @BeforeEach
     void setUp() {
@@ -54,6 +56,7 @@ class CurrentWeatherQueryTest {
         when(airQuality.confirmedReadings()).thenReturn(Map.of());
         when(airQuality.sensor()).thenReturn(Optional.empty());
         when(smogWatch.openEpisode()).thenReturn(Optional.empty());
+        when(laserRuntime.laser()).thenReturn(Optional.empty());
     }
 
     //HAS-429: the silence of the sensor and the episode of smog going on, for the card of the dashboard
@@ -67,7 +70,7 @@ class CurrentWeatherQueryTest {
             .since(NOW.minus(Duration.ofMinutes(40))).level(6).peakPm10(140).build()));
 
         assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", null, null, null, true,
-            new StationStatus.Smog(LocalDateTime.of(2026, 10, 16, 13, 20, 0), 6)));
+            new StationStatus.Smog(LocalDateTime.of(2026, 10, 16, 13, 20, 0), 6), null));
     }
 
     //HAS-427: the air quality stands beside the station, in the order of Metric, with the rules of every metric
@@ -91,7 +94,7 @@ class CurrentWeatherQueryTest {
         when(airQuality.lastReadingAt()).thenReturn(Optional.of(NOW.minus(Duration.ofMinutes(6))));
 
         assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", true,
-            LocalDateTime.of(2026, 10, 16, 13, 59, 30), LocalDateTime.of(2026, 10, 16, 13, 54, 0), false, null));
+            LocalDateTime.of(2026, 10, 16, 13, 59, 30), LocalDateTime.of(2026, 10, 16, 13, 54, 0), false, null, null));
     }
 
     //before the first read of the sensor only its address is known
@@ -103,7 +106,19 @@ class CurrentWeatherQueryTest {
 
         when(airSensorWatch.silent()).thenReturn(true);
 
-        assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", null, null, null, true, null));
+        assertThat(sut.status().airSensor()).isEqualTo(new StationStatus.AirSensor("10.78.30.23", null, null, null, true, null, null));
+    }
+
+    //HAS-437: the hours of the laser with the time of their read, the life and whether to order a new sensor
+    @Test
+    void should_answer_the_run_time_of_the_laser() {
+        when(airQuality.sensor()).thenReturn(Optional.of(SENSOR));
+        when(airQuality.lastCheck()).thenReturn(Optional.empty());
+        when(airQuality.lastReadingAt()).thenReturn(Optional.empty());
+        when(laserRuntime.laser()).thenReturn(Optional.of(new LaserRuntime.Laser(145, 7120, NOW.minus(Duration.ofMinutes(25)), 8000, true)));
+
+        assertThat(sut.status().airSensor().laser())
+            .isEqualTo(new StationStatus.Laser(7120, LocalDateTime.of(2026, 10, 16, 13, 35, 0), 8000, true));
     }
 
     @Test

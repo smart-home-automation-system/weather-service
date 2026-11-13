@@ -2,6 +2,7 @@ package cloud.cholewa.weather.current;
 
 import cloud.cholewa.weather.air.AirQuality;
 import cloud.cholewa.weather.air.AirSensorWatch;
+import cloud.cholewa.weather.air.LaserRuntime;
 import cloud.cholewa.weather.air.SmogWatch;
 import cloud.cholewa.weather.api.model.CurrentMetric;
 import cloud.cholewa.weather.api.model.StationStatus;
@@ -34,6 +35,7 @@ public class CurrentWeatherQuery {
     private final AirQuality airQuality;
     private final AirSensorWatch airSensorWatch;
     private final SmogWatch smogWatch;
+    private final LaserRuntime laserRuntime;
     private final MonitorProperties monitorProperties;
     private final Clock clock;
 
@@ -71,10 +73,13 @@ public class CurrentWeatherQuery {
                 final StationStatus.Smog smog = smogWatch.openEpisode()
                     .map(episode -> new StationStatus.Smog(houseTime(episode.since()), episode.level()))
                     .orElse(null);
+                final StationStatus.Laser laser = laserRuntime.laser()
+                    .map(known -> new StationStatus.Laser(known.hours(), houseTime(known.readAt()), known.lifeHours(), known.warn()))
+                    .orElse(null);
                 return check == null
-                    ? new StationStatus.AirSensor(sensor.address(), null, null, lastReadingAt, silent, smog)
+                    ? new StationStatus.AirSensor(sensor.address(), null, null, lastReadingAt, silent, smog, laser)
                     : new StationStatus.AirSensor(sensor.address(), check.answered(), houseTime(check.checkedAt()), lastReadingAt,
-                        silent, smog);
+                        silent, smog, laser);
             })
             .orElse(null);
     }
